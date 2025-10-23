@@ -1,10 +1,9 @@
 import { Tabs } from "expo-router";
-import React from "react";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { useTheme } from "styled-components/native";
 
 export default function TabLayout() {
-  const theme = useTheme();
+  const theme = useTheme() as any;
 
   return (
     <Tabs
@@ -21,7 +20,7 @@ export default function TabLayout() {
       <Tabs.Screen
         name="home"
         options={{
-          title: "Учиться",
+          title: "Home",
           tabBarIcon: ({ color }) => (
             <Ionicons name="home" size={28} color={color} />
           ),
@@ -30,16 +29,25 @@ export default function TabLayout() {
       <Tabs.Screen
         name="cources"
         options={{
-          title: "Курсы",
+          title: "Courses",
           tabBarIcon: ({ color }) => (
             <Ionicons name="book" size={28} color={color} />
           ),
         }}
       />
       <Tabs.Screen
+        name="video-learning"
+        options={{
+          title: "Video",
+          tabBarIcon: ({ color }) => (
+            <Ionicons name="videocam" size={28} color={color} />
+          ),
+        }}
+      />
+      <Tabs.Screen
         name="profile"
         options={{
-          title: "Профиль",
+          title: "Profile",
           tabBarIcon: ({ color }) => (
             <Ionicons name="person-circle" size={28} color={color} />
           ),

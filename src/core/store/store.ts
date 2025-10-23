@@ -17,6 +17,9 @@ import { progressReducer } from "@features/progress/model/progressSlice";
 import { dictionaryReducer } from "@features/dictionary/model/dictionarySlice";
 import { roadmapReducer } from "@features/roadmap/model/roadmapSlice";
 import { userReducer } from "@entities/user/model/userSlice";
+import { videoLearningReducer } from "@features/video-learning/model/videoLearningSlice";
+import { videoSettingsReducer } from "@features/video-learning/model/videoSettingsSlice";
+import { volumeSettingsReducer } from "@features/video-learning/model/volumeSettingsSlice";
 
 const rootReducer = combineReducers({
   auth: authReducer,
@@ -25,12 +28,15 @@ const rootReducer = combineReducers({
   progress: progressReducer,
   dictionary: dictionaryReducer,
   roadmap: roadmapReducer,
+  videoLearning: videoLearningReducer,
+  videoSettings: videoSettingsReducer,
+  volumeSettings: volumeSettingsReducer,
 });
 
 const persistConfig = {
   key: "root",
   storage: AsyncStorage,
-  whitelist: ["auth", "user"],
+  whitelist: ["auth", "user", "videoSettings", "volumeSettings"],
 };
 
 const persistedReducer = persistReducer(persistConfig, rootReducer);
