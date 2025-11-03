@@ -1,4 +1,7 @@
 import { createAsyncThunk, createSelector, createSlice, PayloadAction } from '@reduxjs/toolkit';
+import type { DifficultyLevel } from './videoSettingsSlice';
+import { setDifficultyLevel, setSpeechSpeed } from './videoSettingsSlice';
+import { relaxFilters } from './filterRelaxation';
 
 import type { RootState } from '@core/store/store';
 import {
@@ -34,6 +37,8 @@ interface VideoLearningState {
   // Track like toggle in progress per content
   likesUpdating: Record<string, boolean>;
   likeErrors: Record<string, string | undefined>;
+  // Filter relaxation message
+  filterRelaxationMessage?: string;
 }
 
 const initialState: VideoLearningState = {
@@ -52,6 +57,7 @@ const initialState: VideoLearningState = {
   loadingContents: {},
   likesUpdating: {},
   likeErrors: {},
+  filterRelaxationMessage: undefined,
 };
 
 const requireUserId = (state: RootState) => {
@@ -62,26 +68,168 @@ const requireUserId = (state: RootState) => {
   return userId;
 };
 
+const mapDifficultyToCefrLevels = (level: DifficultyLevel): string | undefined => {
+  switch (level) {
+    case 'easy':
+      return 'A1';
+    case 'medium':
+      return 'A2,B1';
+    case 'hard':
+      return 'B2,C1';
+    default:
+      return undefined;
+  }
+};
+
+const mapSpeechSpeedToValues = (speed: import('./videoSettingsSlice').SpeechSpeed): string | undefined => {
+  if (speed === 'all') {
+    return undefined;
+  }
+  return speed;
+};
+
 export const fetchVideoFeed = createAsyncThunk<VideoFeedResponse, void, { state: RootState }>(
   'videoLearning/fetchFeed',
   async (_payload, { getState }) => {
-    const userId = requireUserId(getState());
-    return videoLearningApi.getFeed(userId, 1);
+    const state = getState();
+    const userId = requireUserId(state);
+    const cefrLevels = mapDifficultyToCefrLevels(state.videoSettings.difficultyLevel);
+    const speechSpeeds = mapSpeechSpeedToValues(state.videoSettings.speechSpeed);
+    return videoLearningApi.getFeed(userId, { limit: 1, cefrLevels, speechSpeeds });
   },
 );
 
-export const loadMoreVideoFeed = createAsyncThunk<VideoFeedResponse, void, { state: RootState }>(
+export const fetchVideoFeedWithRelaxation = createAsyncThunk<
+  { response: VideoFeedResponse; relaxationMessage?: string },
+  { attemptNumber?: number },
+  { state: RootState; dispatch: any }
+>(
+  'videoLearning/fetchFeedWithRelaxation',
+  async ({ attemptNumber = 0 }, { getState, dispatch }) => {
+    const state = getState();
+    const userId = requireUserId(state);
+    const cefrLevels = mapDifficultyToCefrLevels(state.videoSettings.difficultyLevel);
+    const speechSpeeds = mapSpeechSpeedToValues(state.videoSettings.speechSpeed);
+
+    const response = await videoLearningApi.getFeed(userId, { limit: 1, cefrLevels, speechSpeeds });
+
+    // If we got videos, return success
+    if (response.items.length > 0) {
+      return { response };
+    }
+
+    // No videos found, try to relax filters
+    const relaxed = relaxFilters(
+      {
+        difficultyLevel: state.videoSettings.difficultyLevel,
+        speechSpeed: state.videoSettings.speechSpeed,
+      },
+      attemptNumber
+    );
+
+    // If we can't relax further, return empty result
+    if (!relaxed) {
+      return { response };
+    }
+
+    // Apply relaxed filters temporarily (don't save to AsyncStorage)
+    dispatch(setDifficultyLevel(relaxed.difficultyLevel));
+    dispatch(setSpeechSpeed(relaxed.speechSpeed));
+
+    // Try again with relaxed filters
+    const relaxedCefrLevels = mapDifficultyToCefrLevels(relaxed.difficultyLevel);
+    const relaxedSpeechSpeeds = mapSpeechSpeedToValues(relaxed.speechSpeed);
+    const relaxedResponse = await videoLearningApi.getFeed(userId, {
+      limit: 1,
+      cefrLevels: relaxedCefrLevels,
+      speechSpeeds: relaxedSpeechSpeeds,
+    });
+
+    // If still no videos, try one more time with further relaxation
+    if (relaxedResponse.items.length === 0 && attemptNumber === 0) {
+      return dispatch(fetchVideoFeedWithRelaxation({ attemptNumber: attemptNumber + 1 })).unwrap();
+    }
+
+    return {
+      response: relaxedResponse,
+      relaxationMessage: relaxedResponse.items.length > 0 ? relaxed.message : undefined,
+    };
+  },
+);
+
+export const loadMoreVideoFeed = createAsyncThunk<
+  { response: VideoFeedResponse; relaxationMessage?: string },
+  { attemptNumber?: number },
+  { state: RootState; dispatch: any }
+>(
   'videoLearning/loadMoreFeed',
-  async (_payload, { getState }) => {
+  async ({ attemptNumber = 0 }, { getState, dispatch }) => {
     const state = getState();
     const userId = requireUserId(state);
     const cursor = state.videoLearning.feedCursor;
+    const hasMoreFeed = state.videoLearning.hasMoreFeed;
 
-    if (!cursor || !state.videoLearning.hasMoreFeed) {
-      throw new Error('No more content to load');
+    const cefrLevels = mapDifficultyToCefrLevels(state.videoSettings.difficultyLevel);
+    const speechSpeeds = mapSpeechSpeedToValues(state.videoSettings.speechSpeed);
+
+    // Try to load more with cursor if available and hasMore is true
+    if (cursor && hasMoreFeed) {
+      const response = await videoLearningApi.getFeed(userId, {
+        limit: 2,
+        cursor: cursor ?? undefined,
+        cefrLevels,
+        speechSpeeds,
+      });
+
+      // If we got videos, return success
+      if (response.items.length > 0) {
+        return { response };
+      }
     }
 
-    return videoLearningApi.getFeed(userId, 2, cursor ?? undefined);
+    // No more videos with current filters (or no cursor), try to relax filters
+    const relaxed = relaxFilters(
+      {
+        difficultyLevel: state.videoSettings.difficultyLevel,
+        speechSpeed: state.videoSettings.speechSpeed,
+      },
+      attemptNumber
+    );
+
+    // If we can't relax further, return empty result
+    if (!relaxed) {
+      return {
+        response: {
+          items: [],
+          nextCursor: null,
+          hasMore: false,
+          total: 0
+        }
+      };
+    }
+
+    // Apply relaxed filters temporarily
+    dispatch(setDifficultyLevel(relaxed.difficultyLevel));
+    dispatch(setSpeechSpeed(relaxed.speechSpeed));
+
+    // Try again with relaxed filters (no cursor - start from beginning with new filters)
+    const relaxedCefrLevels = mapDifficultyToCefrLevels(relaxed.difficultyLevel);
+    const relaxedSpeechSpeeds = mapSpeechSpeedToValues(relaxed.speechSpeed);
+    const relaxedResponse = await videoLearningApi.getFeed(userId, {
+      limit: 2,
+      cefrLevels: relaxedCefrLevels,
+      speechSpeeds: relaxedSpeechSpeeds,
+    });
+
+    // If still no videos, try one more time with further relaxation
+    if (relaxedResponse.items.length === 0 && attemptNumber === 0) {
+      return dispatch(loadMoreVideoFeed({ attemptNumber: attemptNumber + 1 })).unwrap();
+    }
+
+    return {
+      response: relaxedResponse,
+      relaxationMessage: relaxedResponse.items.length > 0 ? relaxed.message : undefined,
+    };
   },
 );
 
@@ -176,12 +324,16 @@ const videoLearningSlice = createSlice({
       state.submitStatus = 'idle';
       state.submitError = undefined;
     },
+    clearFilterRelaxationMessage(state) {
+      state.filterRelaxationMessage = undefined;
+    },
   },
   extraReducers: (builder) => {
     builder
       .addCase(fetchVideoFeed.pending, (state) => {
         state.feedStatus = 'loading';
         state.error = undefined;
+        state.filterRelaxationMessage = undefined;
       })
       .addCase(fetchVideoFeed.fulfilled, (state, action) => {
         state.feedStatus = 'succeeded';
@@ -191,8 +343,32 @@ const videoLearningSlice = createSlice({
         state.nextContentId = action.payload.items[0]?.id ?? null;
         state.likesUpdating = {};
         state.likeErrors = {};
+        // Clear relaxation message on successful fetch
+        if (action.payload.items.length > 0) {
+          state.filterRelaxationMessage = undefined;
+        }
       })
       .addCase(fetchVideoFeed.rejected, (state, action) => {
+        state.feedStatus = 'failed';
+        state.error = action.error.message;
+      })
+      .addCase(fetchVideoFeedWithRelaxation.pending, (state) => {
+        state.feedStatus = 'loading';
+        state.error = undefined;
+        state.filterRelaxationMessage = undefined;
+      })
+      .addCase(fetchVideoFeedWithRelaxation.fulfilled, (state, action) => {
+        state.feedStatus = 'succeeded';
+        state.feed = action.payload.response.items;
+        state.feedCursor = action.payload.response.nextCursor;
+        state.hasMoreFeed = action.payload.response.hasMore;
+        state.nextContentId = action.payload.response.items[0]?.id ?? null;
+        state.likesUpdating = {};
+        state.likeErrors = {};
+        // Set relaxation message if filters were relaxed
+        state.filterRelaxationMessage = action.payload.relaxationMessage;
+      })
+      .addCase(fetchVideoFeedWithRelaxation.rejected, (state, action) => {
         state.feedStatus = 'failed';
         state.error = action.error.message;
       })
@@ -202,10 +378,14 @@ const videoLearningSlice = createSlice({
       .addCase(loadMoreVideoFeed.fulfilled, (state, action) => {
         state.isLoadingMore = false;
         const existingIds = new Set(state.feed.map((item) => item.id));
-        const newItems = action.payload.items.filter((item) => !existingIds.has(item.id));
+        const newItems = action.payload.response.items.filter((item) => !existingIds.has(item.id));
         state.feed = [...state.feed, ...newItems];
-        state.feedCursor = action.payload.nextCursor;
-        state.hasMoreFeed = action.payload.hasMore;
+        state.feedCursor = action.payload.response.nextCursor;
+        state.hasMoreFeed = action.payload.response.hasMore;
+        // Set relaxation message if filters were relaxed
+        if (action.payload.relaxationMessage) {
+          state.filterRelaxationMessage = action.payload.relaxationMessage;
+        }
       })
       .addCase(loadMoreVideoFeed.rejected, (state, action) => {
         state.isLoadingMore = false;
@@ -319,7 +499,7 @@ const videoLearningSlice = createSlice({
   },
 });
 
-export const { resetContentState, resetSubmitState } = videoLearningSlice.actions;
+export const { resetContentState, resetSubmitState, clearFilterRelaxationMessage } = videoLearningSlice.actions;
 export const videoLearningReducer = videoLearningSlice.reducer;
 
 export const selectVideoFeed = (state: RootState) => state.videoLearning.feed;
@@ -342,4 +522,5 @@ export const selectLoadedContents = (state: RootState) => state.videoLearning.lo
 export const selectLoadingContents = (state: RootState) => state.videoLearning.loadingContents;
 export const selectLikesUpdating = (state: RootState) => state.videoLearning.likesUpdating;
 export const selectLikeErrors = (state: RootState) => state.videoLearning.likeErrors;
+export const selectFilterRelaxationMessage = (state: RootState) => state.videoLearning.filterRelaxationMessage;
 

@@ -10,7 +10,7 @@ import {
   PanResponder,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { Video, ResizeMode, type AVPlaybackStatus } from "expo-av";
+import { VideoView, useVideoPlayer } from "expo-video";
 import { Ionicons } from "@expo/vector-icons";
 
 import { Typography } from "@shared/ui";
@@ -28,79 +28,77 @@ import {
 } from "@shared/utils/dimensions";
 
 const DOUBLE_TAP_DELAY = 250;
-const STATUS_TIME_THRESHOLD = 0.12;
-const STATUS_DURATION_THRESHOLD = 0.5;
 
 // Topic translation map - moved outside component to prevent recreation
 const TOPIC_TRANSLATIONS: Record<string, string> = {
   // Common topics
-  "travel": "Путешествия",
-  "business": "Бизнес",
-  "technology": "Технологии",
-  "education": "Образование",
-  "health": "Здоровье",
-  "sports": "Спорт",
-  "entertainment": "Развлечения",
-  "food": "Еда",
-  "culture": "Культура",
-  "science": "Наука",
-  "politics": "Политика",
-  "economy": "Экономика",
-  "nature": "Природа",
-  "art": "Искусство",
-  "music": "Музыка",
-  "movies": "Фильмы",
-  "books": "Книги",
-  "history": "История",
-  "geography": "География",
-  "psychology": "Психология",
-  "philosophy": "Философия",
-  "religion": "Религия",
-  "law": "Право",
-  "medicine": "Медицина",
-  "fashion": "Мода",
-  "beauty": "Красота",
-  "lifestyle": "Стиль жизни",
-  "relationships": "Отношения",
-  "family": "Семья",
-  "children": "Дети",
-  "pets": "Питомцы",
-  "home": "Дом",
-  "garden": "Сад",
-  "cooking": "Кулинария",
-  "fitness": "Фитнес",
-  "yoga": "Йога",
-  "meditation": "Медитация",
-  "motivation": "Мотивация",
-  "success": "Успех",
-  "finance": "Финансы",
-  "investment": "Инвестиции",
-  "career": "Карьера",
-  "marketing": "Маркетинг",
-  "sales": "Продажи",
-  "management": "Менеджмент",
-  "leadership": "Лидерство",
-  "communication": "Коммуникация",
-  "languages": "Языки",
-  "grammar": "Грамматика",
-  "vocabulary": "Словарь",
-  "pronunciation": "Произношение",
-  "conversation": "Разговор",
-  "news": "Новости",
-  "events": "События",
-  "social": "Общество",
-  "environment": "Экология",
-  "weather": "Погода",
-  "space": "Космос",
-  "animals": "Животные",
-  "cars": "Автомобили",
-  "aviation": "Авиация",
-  "shipping": "Морское дело",
-  "architecture": "Архитектура",
-  "design": "Дизайн",
-  "photography": "Фотография",
-  "games": "Игры",
-  "hobbies": "Хобби",
+  travel: "Путешествия",
+  business: "Бизнес",
+  technology: "Технологии",
+  education: "Образование",
+  health: "Здоровье",
+  sports: "Спорт",
+  entertainment: "Развлечения",
+  food: "Еда",
+  culture: "Культура",
+  science: "Наука",
+  politics: "Политика",
+  economy: "Экономика",
+  nature: "Природа",
+  art: "Искусство",
+  music: "Музыка",
+  movies: "Фильмы",
+  books: "Книги",
+  history: "История",
+  geography: "География",
+  psychology: "Психология",
+  philosophy: "Философия",
+  religion: "Религия",
+  law: "Право",
+  medicine: "Медицина",
+  fashion: "Мода",
+  beauty: "Красота",
+  lifestyle: "Стиль жизни",
+  relationships: "Отношения",
+  family: "Семья",
+  children: "Дети",
+  pets: "Питомцы",
+  home: "Дом",
+  garden: "Сад",
+  cooking: "Кулинария",
+  fitness: "Фитнес",
+  yoga: "Йога",
+  meditation: "Медитация",
+  motivation: "Мотивация",
+  success: "Успех",
+  finance: "Финансы",
+  investment: "Инвестиции",
+  career: "Карьера",
+  marketing: "Маркетинг",
+  sales: "Продажи",
+  management: "Менеджмент",
+  leadership: "Лидерство",
+  communication: "Коммуникация",
+  languages: "Языки",
+  grammar: "Грамматика",
+  vocabulary: "Словарь",
+  pronunciation: "Произношение",
+  conversation: "Разговор",
+  news: "Новости",
+  events: "События",
+  social: "Общество",
+  environment: "Экология",
+  weather: "Погода",
+  space: "Космос",
+  animals: "Животные",
+  cars: "Автомобили",
+  aviation: "Авиация",
+  shipping: "Морское дело",
+  architecture: "Архитектура",
+  design: "Дизайн",
+  photography: "Фотография",
+  games: "Игры",
+  hobbies: "Хобби",
 };
 
 // Helper function moved outside component to prevent recreation
@@ -133,7 +131,7 @@ const getLevelColor = (level: string): string => {
 const formatTime = (seconds: number): string => {
   const mins = Math.floor(seconds / 60);
   const secs = Math.floor(seconds % 60);
-  return `${mins}:${secs.toString().padStart(2, '0')}`;
+  return `${mins}:${secs.toString().padStart(2, "0")}`;
 };
 
 interface VideoFeedItemProps {
@@ -156,19 +154,12 @@ const VideoFeedItemComponent = ({
   isTabFocused,
 }: VideoFeedItemProps) => {
   const insets = useSafeAreaInsets();
-  const videoRef = useRef<Video | null>(null);
   const pauseIconAnim = useRef(new Animated.Value(0)).current;
   const doubleTapAnim = useRef(new Animated.Value(0)).current;
   const lastTapRef = useRef<number>(0);
   const singleTapTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(
     null
   );
-  const statusSnapshotRef = useRef({
-    isBuffering: true,
-    isPlaying: false,
-    position: 0,
-    duration: 0,
-  });
   const isSeekingRef = useRef(false);
 
   // Calculate content height excluding safe areas
@@ -184,6 +175,12 @@ const VideoFeedItemComponent = ({
   const [isSeeking, setIsSeeking] = useState(false);
   // Initialize shouldLoad based on shouldPreload prop
   const [shouldLoad, setShouldLoad] = useState(shouldPreload);
+
+  // Create video player using expo-video - always create with URL for proper initialization
+  const player = useVideoPlayer(content.videoUrl, (player) => {
+    player.loop = true;
+    player.volume = 1.0;
+  });
 
   const updateIsSeeking = useCallback((value: boolean) => {
     isSeekingRef.current = value;
@@ -241,21 +238,15 @@ const VideoFeedItemComponent = ({
     return translationChunks[0] ?? null;
   }, [activeChunkIndex, translationChunks]);
 
-  // Update shouldLoad when shouldPreload changes
+  // Update shouldLoad when shouldPreload or isActive changes
   useEffect(() => {
-    if (shouldPreload && !shouldLoad) {
+    if ((shouldPreload || isActive) && !shouldLoad) {
       setShouldLoad(true);
     }
-  }, [shouldPreload, shouldLoad]);
+  }, [shouldPreload, isActive, shouldLoad]);
 
   // Reset video state when content changes
   useEffect(() => {
-    statusSnapshotRef.current = {
-      isBuffering: true,
-      isPlaying: false,
-      position: 0,
-      duration: 0,
-    };
     isSeekingRef.current = false;
     setCurrentTime(0);
     setDuration(0);
@@ -263,6 +254,40 @@ const VideoFeedItemComponent = ({
     setIsBuffering(true);
     updateIsSeeking(false);
   }, [content.id, updateIsSeeking]);
+
+  // Track player status with polling
+  useEffect(() => {
+    if (!player || !shouldLoad) return;
+
+    const interval = setInterval(() => {
+      // Update duration
+      if (player.duration && player.duration !== duration) {
+        setDuration(player.duration);
+        // Once we have duration, video is loaded
+        if (isBuffering && player.duration > 0) {
+          setIsBuffering(false);
+        }
+      }
+
+      // Update current time
+      if (!isSeekingRef.current && player.currentTime !== currentTime) {
+        setCurrentTime(player.currentTime);
+      }
+
+      // Update playing status
+      if (player.playing !== isPlaying) {
+        setIsPlaying(player.playing);
+      }
+
+      // Update buffering status - buffering if no duration yet and video should be active
+      const shouldBuffer = !player.duration || player.duration === 0;
+      if (shouldBuffer !== isBuffering) {
+        setIsBuffering(shouldBuffer);
+      }
+    }, 100); // Poll every 100ms
+
+    return () => clearInterval(interval);
+  }, [player, shouldLoad, duration, currentTime, isPlaying, isBuffering]);
 
   useEffect(
     () => () => {
@@ -273,58 +298,12 @@ const VideoFeedItemComponent = ({
     []
   );
 
-  const handleStatusUpdate = useCallback((status: AVPlaybackStatus) => {
-    if (!status.isLoaded) {
-      if (!statusSnapshotRef.current.isBuffering) {
-        statusSnapshotRef.current.isBuffering = true;
-        setIsBuffering(true);
-      }
-      return;
-    }
-
-    const isCurrentlyBuffering = status.isBuffering ?? false;
-    if (statusSnapshotRef.current.isBuffering !== isCurrentlyBuffering) {
-      statusSnapshotRef.current.isBuffering = isCurrentlyBuffering;
-      setIsBuffering(isCurrentlyBuffering);
-    }
-
-    const nextIsPlaying = Boolean(status.isPlaying);
-    if (statusSnapshotRef.current.isPlaying !== nextIsPlaying) {
-      statusSnapshotRef.current.isPlaying = nextIsPlaying;
-      setIsPlaying(nextIsPlaying);
-    }
-
-    if (typeof status.durationMillis === "number") {
-      const nextDuration = status.durationMillis / 1000;
-      if (
-        Math.abs(nextDuration - statusSnapshotRef.current.duration) >=
-        STATUS_DURATION_THRESHOLD
-      ) {
-        setDuration(nextDuration);
-      }
-      statusSnapshotRef.current.duration = nextDuration;
-    }
-
-    if (typeof status.positionMillis === "number") {
-      const nextPosition = status.positionMillis / 1000;
-      const delta = Math.abs(
-        nextPosition - statusSnapshotRef.current.position
-      );
-
-      if (!isSeekingRef.current && delta >= STATUS_TIME_THRESHOLD) {
-        setCurrentTime(nextPosition);
-      }
-
-      statusSnapshotRef.current.position = nextPosition;
-    }
-  }, []);
-
   const togglePlayback = useCallback(() => {
-    if (!videoRef.current) return;
+    if (!player) return;
     if (isPlaying) {
-      videoRef.current.pauseAsync().catch(() => undefined);
+      player.pause();
     } else {
-      videoRef.current.playAsync().catch(() => undefined);
+      player.play();
     }
 
     // Show pause/play icon animation
@@ -341,7 +320,7 @@ const VideoFeedItemComponent = ({
         useNativeDriver: true,
       }),
     ]).start();
-  }, [isPlaying, pauseIconAnim]);
+  }, [isPlaying, pauseIconAnim, player]);
 
   // Single tap to pause/play
   const showDoubleTapLike = useCallback(() => {
@@ -377,7 +356,9 @@ const VideoFeedItemComponent = ({
 
   const handleTap = useCallback(() => {
     const now = Date.now();
-    if (now - lastTapRef.current < DOUBLE_TAP_DELAY) {
+    const timeSinceLastTap = now - lastTapRef.current;
+
+    if (timeSinceLastTap < DOUBLE_TAP_DELAY) {
       lastTapRef.current = 0;
       if (singleTapTimeoutRef.current) {
         clearTimeout(singleTapTimeoutRef.current);
@@ -386,6 +367,7 @@ const VideoFeedItemComponent = ({
       handleDoubleTap();
       return;
     }
+
     lastTapRef.current = now;
     if (singleTapTimeoutRef.current) {
       clearTimeout(singleTapTimeoutRef.current);
@@ -408,21 +390,13 @@ const VideoFeedItemComponent = ({
 
   // Seek to position
   const seekToPosition = useCallback(
-    async (position: number) => {
-      if (!videoRef.current || duration === 0) return;
-      const timeMs = Math.max(
-        0,
-        Math.min(position * duration * 1000, duration * 1000)
-      );
-      try {
-        await videoRef.current.setPositionAsync(timeMs);
-        setCurrentTime(timeMs / 1000);
-        statusSnapshotRef.current.position = timeMs / 1000;
-      } catch (error) {
-        console.warn("[VideoSeek] Failed to seek:", error);
-      }
+    (position: number) => {
+      if (!player || duration === 0) return;
+      const timeSeconds = Math.max(0, Math.min(position * duration, duration));
+      player.currentTime = timeSeconds;
+      setCurrentTime(timeSeconds);
     },
-    [duration]
+    [duration, player]
   );
 
   // PanResponder for progress bar scrubbing
@@ -455,232 +429,263 @@ const VideoFeedItemComponent = ({
     [duration, seekToPosition, updateIsSeeking]
   );
 
+  // Set volume
   useEffect(() => {
-    if (!isActive || !videoRef.current) {
+    if (!isActive || !player) {
       return;
     }
 
-    videoRef.current.setVolumeAsync(globalVolume).catch(() => undefined);
-  }, [content.id, globalVolume, isActive]);
+    player.volume = globalVolume;
+  }, [content.id, globalVolume, isActive, player]);
+
   // Control playback based on active state and tab focus
   useEffect(() => {
-    if (!videoRef.current) return;
+    if (!player) return;
 
     const shouldPlay = isActive && isTabFocused;
 
-    // Use timeout to ensure this runs after Video component's shouldPlay prop is processed
+    // Use timeout to ensure this runs after VideoView is mounted
     const timer = setTimeout(() => {
-      if (!videoRef.current) return;
+      if (!player) return;
 
       if (shouldPlay) {
-        videoRef.current.playAsync().catch(() => undefined);
+        player.play();
       } else {
-        videoRef.current.pauseAsync().catch(() => undefined);
+        player.pause();
       }
     }, 50);
 
     return () => clearTimeout(timer);
-  }, [isActive, isTabFocused, content.id]);
+  }, [isActive, isTabFocused, content.id, player]);
 
   const levelColor = useMemo(
     () => getLevelColor(content.analysis.cefrLevel),
     [content.analysis.cefrLevel]
   );
 
-  // Memoize video source to prevent recreating object
-  const videoSource = useMemo(
-    () => ({ uri: content.videoUrl }),
-    [content.videoUrl]
-  );
-
   return (
-    <TouchableWithoutFeedback onPress={handleTap}>
-      <View style={[styles.container, { height: SCREEN_HEIGHT }]}>
-        {/* Badges row at the top */}
-        <View style={styles.badgesContainer}>
-          <View style={styles.badgesRow}>
-            {/* Level Badge */}
-            <View style={[styles.badge, styles.levelBadge, { backgroundColor: levelColor }]}>
-              <Typography variant="caption" style={styles.badgeText} enableWordLookup={false}>
-                {content.analysis.cefrLevel}
-              </Typography>
-            </View>
-
-            {/* Topic Badges */}
-            {content.analysis.topics.slice(0, 2).map((topic, idx) => (
-              <View key={idx} style={[styles.badge, styles.topicBadge]}>
-                <Typography variant="caption" style={styles.badgeText} enableWordLookup={false}>
-                  {translateTopic(topic)}
-                </Typography>
-              </View>
-            ))}
-          </View>
-        </View>
-
-        {/* Like button centered on the right */}
-        <View style={styles.likeButtonWrapper}>
-          <TouchableOpacity
-            onPress={handleLikePress}
-            activeOpacity={0.7}
-            style={styles.likeButton}
-          >
-            <Ionicons
-              name={content.isLiked ? "heart" : "heart-outline"}
-              size={44}
-              color={content.isLiked ? "#E11D48" : "#FFFFFF"}
-            />
-          </TouchableOpacity>
-          <Typography
-            variant="body"
+    <View style={[styles.container, { height: SCREEN_HEIGHT }]}>
+      {/* Badges row at the top */}
+      <View style={styles.badgesContainer}>
+        <View style={styles.badgesRow}>
+          {/* Level Badge */}
+          <View
             style={[
-              styles.likeCount,
-              content.isLiked ? styles.likeCountActive : undefined,
+              styles.badge,
+              styles.levelBadge,
+              { backgroundColor: levelColor },
             ]}
-            enableWordLookup={false}
           >
-            {content.likesCount}
-          </Typography>
-        </View>
-
-        {/* Video container with black background */}
-        <View style={styles.videoContainer}>
-          {shouldLoad ? (
-            <Video
-              ref={(instance) => {
-                videoRef.current = instance;
-              }}
-              style={[styles.video, { width: SCREEN_WIDTH, height: SCREEN_HEIGHT }]}
-              source={videoSource}
-              resizeMode={ResizeMode.CONTAIN}
-              shouldPlay={isActive && isTabFocused}
-              isLooping={true}
-              onPlaybackStatusUpdate={handleStatusUpdate}
-              useNativeControls={false}
-              videoStyle={[styles.videoInner, { width: SCREEN_WIDTH, height: SCREEN_HEIGHT }]}
-            />
-          ) : (
-            <View style={[styles.video, { width: SCREEN_WIDTH, height: SCREEN_HEIGHT, backgroundColor: '#000' }]} />
-          )}
-        </View>
-
-        {/* Buffering indicator - only show when video is loading but not playing */}
-        {shouldLoad && isBuffering && !isPlaying && (
-          <View style={styles.bufferingContainer}>
-            <View style={styles.bufferingSpinner}>
-              <ActivityIndicator size="large" color="#FFFFFF" />
-            </View>
+            <Typography
+              variant="caption"
+              style={styles.badgeText}
+              enableWordLookup={false}
+            >
+              {content.analysis.cefrLevel}
+            </Typography>
           </View>
-        )}
 
-        <Animated.View
-          pointerEvents="none"
-          style={[
-            styles.doubleTapHeart,
-            {
-              opacity: doubleTapAnim,
-              transform: [
-                {
-                  scale: doubleTapAnim.interpolate({
-                    inputRange: [0, 1],
-                    outputRange: [0.7, 1.25],
-                  }),
-                },
-              ],
-            },
-          ]}
-        >
-          <Ionicons name="heart" size={96} color="#E11D48" />
-        </Animated.View>
-
-        {/* Bottom overlay */}
-        <View
-          style={[
-            styles.bottomGradient,
-            { paddingBottom: Math.max(insets.bottom + 60, 80) },
-          ]}
-          pointerEvents="box-none"
-        >
-          {/* Subtitles with reduced transparency */}
-          {((showEnglishSubtitles && activeTranscript) ||
-            (showRussianSubtitles && activeTranslation)) && (
-            <View style={styles.subtitleContainer}>
-              {showEnglishSubtitles && activeTranscript && (
-                <View style={styles.subtitleBox}>
-                  <Typography variant="body" style={styles.subtitleEn} enableWordLookup={true}>
-                    {activeTranscript.text}
-                  </Typography>
-                </View>
-              )}
-              {showRussianSubtitles && activeTranslation && (
-                <View style={[styles.subtitleBox, styles.subtitleBoxRu]}>
-                  <Typography variant="body" style={styles.subtitleRu} enableWordLookup={false}>
-                    {activeTranslation.text}
-                  </Typography>
-                </View>
-              )}
-            </View>
-          )}
-        </View>
-
-        {/* Completed badge - Compact */}
-        {isCompleted && (
-          <View style={styles.completedBadge}>
-            <View style={styles.completedBadgeInner}>
-              <Ionicons name="checkmark-circle" size={16} color="#4CAF50" />
-              <Typography variant="caption" style={styles.completedText}>
-                Просмотренно
+          {/* Topic Badges */}
+          {content.analysis.topics.slice(0, 2).map((topic, idx) => (
+            <View key={idx} style={[styles.badge, styles.topicBadge]}>
+              <Typography
+                variant="caption"
+                style={styles.badgeText}
+                enableWordLookup={false}
+              >
+                {translateTopic(topic)}
               </Typography>
             </View>
-          </View>
-        )}
-
-        {/* Center pause/play animation */}
-        <Animated.View
-          style={[
-            styles.centerIcon,
-            {
-              opacity: pauseIconAnim,
-              transform: [
-                {
-                  scale: pauseIconAnim.interpolate({
-                    inputRange: [0, 1],
-                    outputRange: [0.5, 1.1],
-                  }),
-                },
-              ],
-            },
-          ]}
-          pointerEvents="none"
-        >
-          <View style={styles.iconBackground}>
-            <Ionicons
-              name={isPlaying ? "pause" : "play"}
-              size={56}
-              color="#FFFFFF"
-            />
-          </View>
-        </Animated.View>
-
-        {/* Progress bar with scrubbing */}
-        <View style={styles.progressBarContainer} {...panResponder.panHandlers}>
-          <View style={styles.progressBar}>
-            <View
-              style={[styles.progressFill, { width: `${progress * 100}%` }]}
-            />
-          </View>
-          {isSeeking && (
-            <>
-              <View style={[styles.seekThumb, { left: `${progress * 100}%` }]} />
-              <View style={[styles.timeCodeContainer, { left: `${progress * 100}%` }]}>
-                <Typography variant="caption" style={styles.timeCodeText}>
-                  {formatTime(currentTime)} / {formatTime(duration)}
-                </Typography>
-              </View>
-            </>
-          )}
+          ))}
         </View>
       </View>
-    </TouchableWithoutFeedback>
+
+      {/* Like button centered on the right */}
+      <View style={styles.likeButtonWrapper}>
+        <TouchableOpacity
+          onPress={handleLikePress}
+          activeOpacity={0.7}
+          style={styles.likeButton}
+        >
+          <Ionicons
+            name={content.isLiked ? "heart" : "heart-outline"}
+            size={44}
+            color={content.isLiked ? "#E11D48" : "#FFFFFF"}
+          />
+        </TouchableOpacity>
+        <Typography
+          variant="body"
+          style={[
+            styles.likeCount,
+            content.isLiked ? styles.likeCountActive : undefined,
+          ]}
+          enableWordLookup={false}
+        >
+          {content.likesCount}
+        </Typography>
+      </View>
+
+      {/* Video container with black background */}
+      <View style={styles.videoContainer}>
+        {shouldLoad ? (
+          <VideoView
+            player={player}
+            style={[
+              styles.video,
+              { width: SCREEN_WIDTH, height: SCREEN_HEIGHT },
+            ]}
+            contentFit="contain"
+            nativeControls={false}
+            pointerEvents="none"
+          />
+        ) : (
+          <View
+            style={[
+              styles.video,
+              {
+                width: SCREEN_WIDTH,
+                height: SCREEN_HEIGHT,
+                backgroundColor: "#000",
+              },
+            ]}
+          />
+        )}
+      </View>
+
+      {/* Buffering indicator - only show when video is loading but not playing */}
+      {shouldLoad && isBuffering && !isPlaying && (
+        <View style={styles.bufferingContainer}>
+          <View style={styles.bufferingSpinner}>
+            <ActivityIndicator size="large" color="#FFFFFF" />
+          </View>
+        </View>
+      )}
+
+      <Animated.View
+        pointerEvents="none"
+        style={[
+          styles.doubleTapHeart,
+          {
+            opacity: doubleTapAnim,
+            transform: [
+              {
+                scale: doubleTapAnim.interpolate({
+                  inputRange: [0, 1],
+                  outputRange: [0.7, 1.25],
+                }),
+              },
+            ],
+          },
+        ]}
+      >
+        <Ionicons name="heart" size={96} color="#E11D48" />
+      </Animated.View>
+
+      {/* Bottom overlay */}
+      <View
+        style={[
+          styles.bottomGradient,
+          { paddingBottom: Math.max(insets.bottom + 60, 80) },
+        ]}
+        pointerEvents="box-none"
+      >
+        {/* Subtitles with reduced transparency */}
+        {((showEnglishSubtitles && activeTranscript) ||
+          (showRussianSubtitles && activeTranslation)) && (
+          <View style={styles.subtitleContainer}>
+            {showEnglishSubtitles && activeTranscript && (
+              <View style={styles.subtitleBox}>
+                <Typography
+                  variant="body"
+                  style={styles.subtitleEn}
+                  enableWordLookup={true}
+                >
+                  {activeTranscript.text}
+                </Typography>
+              </View>
+            )}
+            {showRussianSubtitles && activeTranslation && (
+              <View style={[styles.subtitleBox, styles.subtitleBoxRu]}>
+                <Typography
+                  variant="body"
+                  style={styles.subtitleRu}
+                  enableWordLookup={false}
+                >
+                  {activeTranslation.text}
+                </Typography>
+              </View>
+            )}
+          </View>
+        )}
+      </View>
+
+      {/* Completed badge - Compact */}
+      {isCompleted && (
+        <View style={styles.completedBadge}>
+          <View style={styles.completedBadgeInner}>
+            <Ionicons name="checkmark-circle" size={16} color="#4CAF50" />
+            <Typography variant="caption" style={styles.completedText}>
+              Просмотренно
+            </Typography>
+          </View>
+        </View>
+      )}
+
+      {/* Center pause/play animation */}
+      <Animated.View
+        style={[
+          styles.centerIcon,
+          {
+            opacity: pauseIconAnim,
+            transform: [
+              {
+                scale: pauseIconAnim.interpolate({
+                  inputRange: [0, 1],
+                  outputRange: [0.5, 1.1],
+                }),
+              },
+            ],
+          },
+        ]}
+        pointerEvents="none"
+      >
+        <View style={styles.iconBackground}>
+          <Ionicons
+            name={isPlaying ? "pause" : "play"}
+            size={56}
+            color="#FFFFFF"
+          />
+        </View>
+      </Animated.View>
+
+      {/* Progress bar with scrubbing */}
+      <View style={styles.progressBarContainer} {...panResponder.panHandlers}>
+        <View style={styles.progressBar}>
+          <View
+            style={[styles.progressFill, { width: `${progress * 100}%` }]}
+          />
+        </View>
+        {isSeeking && (
+          <>
+            <View style={[styles.seekThumb, { left: `${progress * 100}%` }]} />
+            <View
+              style={[styles.timeCodeContainer, { left: `${progress * 100}%` }]}
+            >
+              <Typography variant="caption" style={styles.timeCodeText}>
+                {formatTime(currentTime)} / {formatTime(duration)}
+              </Typography>
+            </View>
+          </>
+        )}
+      </View>
+
+      {/* Transparent overlay to catch taps */}
+      <View style={styles.tapOverlay}>
+        <TouchableWithoutFeedback onPress={handleTap}>
+          <View style={StyleSheet.absoluteFill} />
+        </TouchableWithoutFeedback>
+      </View>
+    </View>
   );
 };
 
@@ -722,8 +727,8 @@ const styles = StyleSheet.create({
     letterSpacing: 0.2,
     includeFontPadding: false,
     fontFamily: Platform.select({
-      ios: 'System',
-      android: 'Roboto',
+      ios: "System",
+      android: "Roboto",
     }),
   },
   likeButtonWrapper: {
@@ -750,8 +755,8 @@ const styles = StyleSheet.create({
     marginTop: -12,
     includeFontPadding: false,
     fontFamily: Platform.select({
-      ios: 'System',
-      android: 'Roboto',
+      ios: "System",
+      android: "Roboto",
     }),
   },
   likeCountActive: {
@@ -871,8 +876,8 @@ const styles = StyleSheet.create({
     textAlign: "center",
     includeFontPadding: false,
     fontFamily: Platform.select({
-      ios: 'System',
-      android: 'Roboto',
+      ios: "System",
+      android: "Roboto",
     }),
   },
   subtitleRu: {
@@ -881,8 +886,8 @@ const styles = StyleSheet.create({
     textAlign: "center",
     includeFontPadding: false,
     fontFamily: Platform.select({
-      ios: 'System',
-      android: 'Roboto',
+      ios: "System",
+      android: "Roboto",
     }),
   },
   centerIcon: {
@@ -902,12 +907,13 @@ const styles = StyleSheet.create({
   },
   progressBarContainer: {
     position: "absolute",
-    bottom: 45,
+    bottom: 34,
     left: 0,
     right: 0,
     height: 20,
     justifyContent: "center",
     paddingHorizontal: 0,
+    zIndex: 2,
   },
   progressBar: {
     height: 4,
@@ -945,6 +951,10 @@ const styles = StyleSheet.create({
     color: "#FFFFFF",
     fontSize: 12,
     fontWeight: "600",
+  },
+  tapOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 1,
   },
 });
 

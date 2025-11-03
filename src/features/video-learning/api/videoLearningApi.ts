@@ -122,18 +122,31 @@ export interface UpdateLikeResponse {
   isLiked: boolean;
 }
 
+interface FeedOptions {
+  limit?: number;
+  cursor?: string | null;
+  cefrLevels?: string;
+  speechSpeeds?: string;
+}
+
 const baseHeaders = (userId: string) => ({
   'x-user-id': userId,
 });
 
 export const videoLearningApi = {
-  getFeed(userId: string, limit?: number, cursor?: string | null) {
+  getFeed(userId: string, options: FeedOptions = {}) {
     const params = new URLSearchParams();
-    if (limit !== undefined && limit > 0) {
-      params.append('limit', limit.toString());
+    if (options.limit !== undefined && options.limit > 0) {
+      params.append('limit', options.limit.toString());
     }
-    if (cursor) {
-      params.append('cursor', cursor);
+    if (options.cursor) {
+      params.append('cursor', options.cursor);
+    }
+    if (options.cefrLevels) {
+      params.append('cefrLevels', options.cefrLevels);
+    }
+    if (options.speechSpeeds) {
+      params.append('speechSpeeds', options.speechSpeeds);
     }
     const query = params.toString();
     const url = query ? `video-learning/feed?${query}` : 'video-learning/feed';

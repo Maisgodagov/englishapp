@@ -8,6 +8,7 @@ import { useAppDispatch, useAppSelector } from "@core/store/hooks";
 import { Typography } from "@shared/ui";
 import {
   fetchVideoFeed,
+  fetchVideoFeedWithRelaxation,
   loadVideoContent,
   updateVideoLike,
   selectVideoFeed,
@@ -67,7 +68,7 @@ export default function VideoLearningScreen() {
 
   useEffect(() => {
     if (isTabFocused && feedStatus === "idle") {
-      dispatch(fetchVideoFeed());
+      dispatch(fetchVideoFeedWithRelaxation({ attemptNumber: 0 }));
     }
   }, [dispatch, feedStatus, isTabFocused]);
 

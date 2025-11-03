@@ -10,7 +10,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import Swipeable from "react-native-gesture-handler/Swipeable";
 import Ionicons from "@expo/vector-icons/Ionicons";
-import { Audio } from "expo-av";
+import { Audio } from "expo-audio";
 import { useTheme } from "styled-components/native";
 
 import { useAppDispatch, useAppSelector } from "@core/store/hooks";

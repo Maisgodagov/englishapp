@@ -30,10 +30,13 @@ import {
   loadMoreVideoFeed,
   selectHasMoreFeed,
   selectIsLoadingMore,
+  selectFilterRelaxationMessage,
+  clearFilterRelaxationMessage,
 } from "../model/videoLearningSlice";
 import { VideoFeedItem } from "./VideoFeedItem";
 import { ExerciseOverlay } from "./ExerciseOverlay";
 import { VideoSettingsModal } from "./VideoSettingsModal";
+import { FilterRelaxationBanner } from "./FilterRelaxationBanner";
 import type {
   VideoContent,
   SubmitAnswerPayload,
@@ -81,25 +84,31 @@ export const VideoFeed = ({
   const theme = useTheme() as any;
   const insets = useSafeAreaInsets();
   const dispatch = useAppDispatch();
+  const viewMode = useAppSelector(selectViewMode);
+  const exerciseCount = useAppSelector(selectExerciseCount);
+  const hasMoreFeed = useAppSelector(selectHasMoreFeed);
+  const isLoadingMore = useAppSelector(selectIsLoadingMore);
+  const filterRelaxationMessage = useAppSelector(selectFilterRelaxationMessage);
+
   const flatListRef = useRef<FlatList<FeedItem>>(null);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [showBlockMessage, setShowBlockMessage] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
-  const scrollLocked = useRef(false);
+  const [activeVideoIndex, setActiveVideoIndex] = useState(0);
+  const currentIndexRef = useRef(0);
+  const blockMessageTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null
+  );
+  const lastScrollOffsetRef = useRef(0);
   const loadMoreRequestedRef = useRef(false);
   const previousVideoCountRef = useRef(videos.length);
+  const previousViewModeRef = useRef(viewMode);
 
   // Calculate content height excluding safe areas
   const SCREEN_HEIGHT = useMemo(
     () => getContentHeight(insets.top, insets.bottom),
     [insets.top, insets.bottom]
   );
-
-  // Get settings
-  const viewMode = useAppSelector(selectViewMode);
-  const exerciseCount = useAppSelector(selectExerciseCount);
-  const hasMoreFeed = useAppSelector(selectHasMoreFeed);
-  const isLoadingMore = useAppSelector(selectIsLoadingMore);
 
   // Build feed based on view mode
   const feedItems: FeedItem[] = useMemo(() => {
@@ -117,6 +126,48 @@ export const VideoFeed = ({
   const currentItem = feedItems[currentIndex];
   const currentVideoIndex = currentItem?.index ?? 0;
 
+  useEffect(() => {
+    if (currentItem && currentItem.index !== activeVideoIndex) {
+      setActiveVideoIndex(currentItem.index);
+    }
+  }, [currentItem, activeVideoIndex]);
+
+  useEffect(() => {
+    if (previousViewModeRef.current === viewMode) {
+      return;
+    }
+
+    previousViewModeRef.current = viewMode;
+
+    const targetIndex = feedItems.findIndex(
+      (item) => item.type === "video" && item.index === activeVideoIndex
+    );
+
+    if (targetIndex >= 0 && targetIndex !== currentIndex) {
+      currentIndexRef.current = targetIndex;
+      setCurrentIndex(targetIndex);
+      requestAnimationFrame(() => {
+        flatListRef.current?.scrollToIndex({
+          index: targetIndex,
+          animated: false,
+        });
+      });
+    }
+  }, [viewMode, feedItems, activeVideoIndex, currentIndex]);
+
+  useEffect(() => {
+    currentIndexRef.current = currentIndex;
+  }, [currentIndex]);
+
+  useEffect(() => {
+    return () => {
+      if (blockMessageTimerRef.current) {
+        clearTimeout(blockMessageTimerRef.current);
+        blockMessageTimerRef.current = null;
+      }
+    };
+  }, []);
+
   // Filter exercises based on count setting
   const getFilteredExercises = useCallback(
     (content: VideoContent) => {
@@ -130,28 +181,44 @@ export const VideoFeed = ({
   );
 
   // Check if user can scroll down
-  const canScrollDown = useCallback(() => {
-    if (currentIndex >= feedItems.length - 1) return false;
+  // Returns: { canScroll: boolean, reason: 'end' | 'exercises' | null }
+  const canScrollDown = useCallback((): { canScroll: boolean; reason: 'end' | 'exercises' | null } => {
+    // Can't scroll past the end
+    if (currentIndex >= feedItems.length - 1) {
+      return { canScroll: false, reason: 'end' };
+    }
 
     const currentFeedItem = feedItems[currentIndex];
 
-    // If in without-exercises mode, always allow scroll
-    if (viewMode === "without-exercises") return true;
+    // Safety check: if current item doesn't exist, don't allow scroll
+    if (!currentFeedItem) {
+      return { canScroll: false, reason: 'end' };
+    }
 
+    // If in without-exercises mode, ALL items are videos, so always allow scroll
+    if (viewMode === "without-exercises") {
+      return { canScroll: true, reason: null };
+    }
+
+    // In with-exercises mode:
     // If on video page, always allow scroll to exercises
-    if (currentFeedItem?.type === "video") return true;
+    if (currentFeedItem.type === "video") {
+      return { canScroll: true, reason: null };
+    }
 
     // If on exercises page, check if completed
-    if (currentFeedItem?.type === "exercises") {
+    if (currentFeedItem.type === "exercises") {
       const hasSubmission =
         lastSubmission &&
         lastSubmission.contentId === currentFeedItem.content.id &&
         submitStatus === "succeeded";
       const isInCompleted = completedVideoIds.has(currentFeedItem.content.id);
-      return isInCompleted || hasSubmission;
+      const canScroll = isInCompleted || Boolean(hasSubmission);
+      return { canScroll, reason: canScroll ? null : 'exercises' };
     }
 
-    return true;
+    // Default: allow scroll
+    return { canScroll: true, reason: null };
   }, [
     currentIndex,
     feedItems,
@@ -161,52 +228,139 @@ export const VideoFeed = ({
     viewMode,
   ]);
 
+  const showScrollBlockedMessage = useCallback(() => {
+    setShowBlockMessage(true);
+    if (blockMessageTimerRef.current) {
+      clearTimeout(blockMessageTimerRef.current);
+    }
+    blockMessageTimerRef.current = setTimeout(() => {
+      setShowBlockMessage(false);
+      blockMessageTimerRef.current = null;
+    }, 2000);
+  }, []);
+
+  const handleDismissRelaxationBanner = useCallback(() => {
+    dispatch(clearFilterRelaxationMessage());
+  }, [dispatch]);
+
   const handleScroll = useCallback(
     (event: NativeSyntheticEvent<NativeScrollEvent>) => {
-      const offsetY = event.nativeEvent.contentOffset.y;
-      const rawIndex = Math.round(offsetY / SCREEN_HEIGHT);
+      lastScrollOffsetRef.current = event.nativeEvent.contentOffset.y;
+    },
+    []
+  );
 
-      if (rawIndex === currentIndex) {
-        return;
+  const handleScrollBeginDrag = useCallback(() => {
+    if (blockMessageTimerRef.current) {
+      clearTimeout(blockMessageTimerRef.current);
+      blockMessageTimerRef.current = null;
+    }
+  }, []);
+
+  const computeTargetIndex = useCallback(
+    (
+      offsetY: number,
+      currentIndexValue: number,
+      options?: { velocityY?: number; showBlockMessage?: boolean }
+    ) => {
+      const progress = SCREEN_HEIGHT === 0 ? 0 : offsetY / SCREEN_HEIGHT;
+      const delta = progress - currentIndexValue;
+      const velocityY = options?.velocityY ?? 0;
+      const velocityThreshold = 0.35;
+      const dragThreshold = 0.18;
+
+      let direction = 0;
+      if (delta > dragThreshold) {
+        direction = 1;
+      } else if (delta < -dragThreshold) {
+        direction = -1;
+      } else if (Math.abs(velocityY) > velocityThreshold) {
+        direction = velocityY > 0 ? -1 : 1;
       }
 
-      const direction = rawIndex > currentIndex ? 1 : -1;
-      let targetIndex = rawIndex;
-
-      if (Math.abs(rawIndex - currentIndex) > 1) {
-        targetIndex = currentIndex + direction;
+      if (direction === 0) {
+        return currentIndexValue;
       }
 
-      if (direction > 0 && !canScrollDown()) {
-        scrollLocked.current = true;
-        flatListRef.current?.scrollToIndex({
-          index: currentIndex,
-          animated: true,
-        });
-        setShowBlockMessage(true);
-        setTimeout(() => setShowBlockMessage(false), 2000);
-        return;
+      if (direction > 0) {
+        const scrollCheck = canScrollDown();
+        if (!scrollCheck.canScroll) {
+          // Only show blocked message if it's due to exercises, not end of feed
+          if (scrollCheck.reason === 'exercises' && (options?.showBlockMessage ?? true)) {
+            showScrollBlockedMessage();
+          }
+          return currentIndexValue;
+        }
       }
 
-      if (targetIndex < 0 || targetIndex >= feedItems.length) {
-        return;
+      let nextIndex = currentIndexValue + direction;
+      if (nextIndex < 0 || nextIndex >= feedItems.length) {
+        nextIndex = Math.max(
+          0,
+          Math.min(nextIndex, Math.max(feedItems.length - 1, 0))
+        );
       }
 
-      if (targetIndex !== rawIndex) {
+      return nextIndex;
+    },
+    [SCREEN_HEIGHT, canScrollDown, feedItems.length, showScrollBlockedMessage]
+  );
+
+  const handleScrollEndDrag = useCallback(
+    (event: NativeSyntheticEvent<NativeScrollEvent>) => {
+      const offsetY =
+        event.nativeEvent.contentOffset?.y ?? lastScrollOffsetRef.current;
+      const velocityY = event.nativeEvent.velocity?.y ?? 0;
+      const previousIndex = currentIndexRef.current;
+      const targetIndex = computeTargetIndex(offsetY, previousIndex, {
+        velocityY,
+      });
+
+      if (targetIndex !== previousIndex) {
+        currentIndexRef.current = targetIndex;
+        setCurrentIndex(targetIndex);
+      }
+
+      if (feedItems.length > 0) {
         flatListRef.current?.scrollToIndex({
           index: targetIndex,
           animated: true,
         });
       }
-
-      setCurrentIndex(targetIndex);
     },
-    [currentIndex, canScrollDown, feedItems.length, SCREEN_HEIGHT]
+    [computeTargetIndex, feedItems.length]
   );
 
-  const handleScrollBeginDrag = useCallback(() => {
-    scrollLocked.current = false;
-  }, []);
+  const handleMomentumScrollEnd = useCallback(
+    (event: NativeSyntheticEvent<NativeScrollEvent>) => {
+      const offsetY =
+        event.nativeEvent.contentOffset?.y ?? lastScrollOffsetRef.current;
+      const velocityY = event.nativeEvent.velocity?.y ?? 0;
+      const previousIndex = currentIndexRef.current;
+      const targetIndex = computeTargetIndex(offsetY, previousIndex, {
+        velocityY,
+        showBlockMessage: false,
+      });
+
+      if (targetIndex !== previousIndex) {
+        currentIndexRef.current = targetIndex;
+        setCurrentIndex(targetIndex);
+        flatListRef.current?.scrollToIndex({
+          index: targetIndex,
+          animated: true,
+        });
+        return;
+      }
+
+      if (feedItems.length > 0) {
+        flatListRef.current?.scrollToIndex({
+          index: previousIndex,
+          animated: false,
+        });
+      }
+    },
+    [computeTargetIndex, feedItems.length]
+  );
 
   const handleSubmit = useCallback(
     (answers: SubmitAnswerPayload[]) => {
@@ -228,32 +382,24 @@ export const VideoFeed = ({
 
   useEffect(() => {
     if (
-      !hasMoreFeed ||
       isLoadingMore ||
       videos.length === 0 ||
-      totalFeedCount === 0
+      loadMoreRequestedRef.current
     ) {
       return;
     }
 
-    const remainingUnloaded = totalFeedCount - videos.length;
-    if (remainingUnloaded > 1) {
-      return;
-    }
-
-    if (
-      currentVideoIndex >= Math.max(0, videos.length - 2) &&
-      !loadMoreRequestedRef.current
-    ) {
+    // Start loading more videos when we're 3 videos away from the end
+    // This gives time for videos to buffer while user watches current video
+    // Also try to load more even if hasMoreFeed is false (filter relaxation)
+    if (currentVideoIndex >= Math.max(0, videos.length - 3)) {
       loadMoreRequestedRef.current = true;
-      dispatch(loadMoreVideoFeed());
+      dispatch(loadMoreVideoFeed({ attemptNumber: 0 }));
     }
   }, [
     dispatch,
-    hasMoreFeed,
     isLoadingMore,
     videos.length,
-    totalFeedCount,
     currentVideoIndex,
   ]);
 
@@ -289,8 +435,14 @@ export const VideoFeed = ({
     ({ item, index }) => {
       const isActive = index === currentIndex;
       const isCompleted = completedVideoIds.has(item.content.id);
-      // Preload current and next video for smooth transitions
-      const shouldPreload = index === currentIndex || index === currentIndex + 1 || index === currentIndex + 2;
+      // Preload current video and 2 videos ahead for smooth transitions
+      // This allows for buffering while user watches current video
+      const shouldPreload =
+        index === currentIndex ||
+        index === currentIndex + 1 ||
+        index === currentIndex + 2 ||
+        index === currentIndex + 3 ||
+        index === currentIndex + 4;
 
       if (item.type === "video") {
         return (
@@ -399,6 +551,8 @@ export const VideoFeed = ({
         decelerationRate="fast"
         onScroll={handleScroll}
         onScrollBeginDrag={handleScrollBeginDrag}
+        onScrollEndDrag={handleScrollEndDrag}
+        onMomentumScrollEnd={handleMomentumScrollEnd}
         scrollEventThrottle={16}
         getItemLayout={getItemLayout}
         removeClippedSubviews={true}
@@ -438,6 +592,14 @@ export const VideoFeed = ({
         visible={showSettings}
         onClose={() => setShowSettings(false)}
       />
+
+      {/* Filter relaxation banner */}
+      {filterRelaxationMessage && (
+        <FilterRelaxationBanner
+          message={filterRelaxationMessage}
+          onDismiss={handleDismissRelaxationBanner}
+        />
+      )}
     </View>
   );
 };

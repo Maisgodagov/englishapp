@@ -9,7 +9,7 @@ import {
   Pressable,
 } from 'react-native';
 import { useTheme } from 'styled-components/native';
-import { Video, ResizeMode, type AVPlaybackStatus } from 'expo-av';
+import { VideoView, useVideoPlayer } from 'expo-video';
 import Carousel from 'react-native-reanimated-carousel';
 
 import { useAppSelector } from '@core/store/hooks';
@@ -37,71 +37,64 @@ interface VideoCardProps {
 const VideoCard = React.memo(({ snippet, phrase, theme, isActive }: VideoCardProps) => {
   const [isPlaying, setIsPlaying] = React.useState(false);
   const [isReady, setIsReady] = React.useState(false);
-  const videoRef = React.useRef<Video>(null);
   const isPlayingRef = React.useRef(false);
 
-  const startMillis = snippet.startSeconds * 1000;
-  const endMillis = snippet.endSeconds * 1000;
+  const startSeconds = snippet.startSeconds;
+  const endSeconds = snippet.endSeconds;
 
-  // Memoize video source to prevent recreating object
-  const videoSource = React.useMemo(
-    () => ({ uri: snippet.videoUrl }),
-    [snippet.videoUrl]
-  );
+  // Create video player
+  const player = useVideoPlayer(snippet.videoUrl, (player) => {
+    player.loop = false;
+    player.volume = 1.0;
+  });
 
-  // Автоматически запускаем/останавливаем видео в зависимости от активности карточки
+  // Track player status
   React.useEffect(() => {
-    if (!isReady) return;
+    if (!player) return;
 
-    const handleActiveChange = async () => {
-      if (isActive && !isPlaying) {
-        // Карточка стала активной - запускаем видео
-        try {
-          await videoRef.current?.playFromPositionAsync(startMillis);
-          setIsPlaying(true);
-          isPlayingRef.current = true;
-        } catch (error) {
-          // Silent error handling
-        }
-      } else if (!isActive && isPlaying) {
-        // Карточка стала неактивной - останавливаем видео
-        try {
-          await videoRef.current?.pauseAsync();
-          setIsPlaying(false);
-          isPlayingRef.current = false;
-        } catch (error) {
-          // Silent error handling
-        }
+    const interval = setInterval(() => {
+      if (player.playing !== isPlaying) {
+        setIsPlaying(player.playing);
+        isPlayingRef.current = player.playing;
       }
-    };
 
-    handleActiveChange();
-  }, [isActive, isReady, snippet.id, startMillis]);
+      // Check if we've reached the end of the snippet
+      if (player.currentTime >= endSeconds && isPlayingRef.current) {
+        player.pause();
+        setIsPlaying(false);
+        isPlayingRef.current = false;
+      }
 
-  const handlePlayPause = async () => {
-    if (!videoRef.current || !isReady || !isActive) {
+      // Set ready state when video has duration
+      if (player.duration > 0 && !isReady) {
+        setIsReady(true);
+      }
+    }, 100);
+
+    return () => clearInterval(interval);
+  }, [player, isPlaying, isReady, endSeconds]);
+
+  // Auto play/pause based on active state
+  React.useEffect(() => {
+    if (!isReady || !player) return;
+
+    if (isActive && !isPlaying) {
+      player.currentTime = startSeconds;
+      player.play();
+    } else if (!isActive && isPlaying) {
+      player.pause();
+    }
+  }, [isActive, isReady, isPlaying, player, startSeconds]);
+
+  const handlePlayPause = () => {
+    if (!player || !isReady || !isActive) {
       return;
     }
 
     if (isPlaying) {
-      await videoRef.current.pauseAsync();
-      setIsPlaying(false);
-      isPlayingRef.current = false;
+      player.pause();
     } else {
-      await videoRef.current.playAsync();
-      setIsPlaying(true);
-      isPlayingRef.current = true;
-    }
-  };
-
-  const handleStatusUpdate = async (status: AVPlaybackStatus) => {
-    if (!status.isLoaded) return;
-
-    // Используем ref чтобы не вызывать лишние обновления state
-    if (status.positionMillis >= endMillis && isPlayingRef.current) {
-      await videoRef.current?.pauseAsync();
-      setIsPlaying(false);
-      isPlayingRef.current = false;
+      player.play();
     }
   };
 
@@ -140,15 +133,11 @@ const VideoCard = React.memo(({ snippet, phrase, theme, isActive }: VideoCardPro
     <View style={styles.videoCard}>
       <View style={styles.videoWrapper}>
         <Pressable onPress={handlePlayPause} style={styles.videoContainer}>
-          <Video
-            ref={videoRef}
-            source={videoSource}
+          <VideoView
+            player={player}
             style={styles.video}
-            resizeMode={ResizeMode.COVER}
-            isLooping={false}
-            onLoad={() => setIsReady(true)}
-            onPlaybackStatusUpdate={handleStatusUpdate}
-            useNativeControls={false}
+            contentFit="cover"
+            nativeControls={false}
           />
 
           {snippet.contextText && (

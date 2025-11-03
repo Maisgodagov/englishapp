@@ -1,4 +1,4 @@
-import { Video } from 'expo-av';
+import type { VideoPlayer } from 'expo-video';
 
 /**
  * Анализатор громкости видео на основе реального воспроизведения
@@ -64,18 +64,16 @@ export class AudioVolumeAnalyzer {
    * Этот метод вызывается после начала воспроизведения
    */
   static async analyzePlaybackPattern(
-    videoRef: Video | null,
+    player: VideoPlayer | null,
     duration: number,
     currentVolume: number
   ): Promise<VolumeAnalysisResult> {
-    if (!videoRef) {
+    if (!player) {
       return this.estimateFromMetadata('', duration);
     }
 
     try {
-      const status = await videoRef.getStatusAsync();
-
-      if (!status.isLoaded) {
+      if (player.status !== 'readyToPlay') {
         return this.estimateFromMetadata('', duration);
       }
 
@@ -88,7 +86,7 @@ export class AudioVolumeAnalyzer {
 
       // Анализируем позицию воспроизведения
       // Если пользователь быстро пропустил начало, возможно оно слишком громкое/тихое
-      const playbackRate = status.rate || 1.0;
+      const playbackRate = player.playbackRate ?? 1.0;
       if (playbackRate !== 1.0) {
         // Необычная скорость воспроизведения - снижаем уверенность
         confidence *= 0.8;

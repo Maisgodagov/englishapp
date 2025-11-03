@@ -9,7 +9,7 @@ import {
   type NativeScrollEvent,
   type NativeSyntheticEvent,
 } from 'react-native';
-import { Video, ResizeMode, type AVPlaybackStatus } from 'expo-av';
+import { VideoView, useVideoPlayer } from 'expo-video';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useTheme } from 'styled-components/native';
 import { Ionicons } from '@expo/vector-icons';
@@ -39,13 +39,18 @@ export const VideoLearningSession = ({
 }: VideoLearningSessionProps) => {
   const theme = useTheme() as any;
   const insets = useSafeAreaInsets();
-  const videoRef = useRef<Video | null>(null);
   const scrollRef = useRef<ScrollView | null>(null);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
   const fadeAnim = useRef(new Animated.Value(1)).current;
 
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
+
+  // Create video player using expo-video
+  const player = useVideoPlayer(content.videoUrl, (player) => {
+    player.loop = false;
+    player.volume = 1.0;
+  });
   const [activeView, setActiveView] = useState<'video' | 'exercises'>('video');
   const [answers, setAnswers] = useState<Record<string, number>>({});
   const [currentExerciseIndex, setCurrentExerciseIndex] = useState(0);
@@ -104,14 +109,24 @@ export const VideoLearningSession = ({
     return translationChunks[0] ?? null;
   }, [activeChunkIndex, translationChunks]);
 
-  const handleStatusUpdate = useCallback((status: AVPlaybackStatus) => {
-    if (!status.isLoaded) return;
-    setCurrentTime(status.positionMillis / 1000);
-    setIsPlaying(status.isPlaying ?? false);
-    if (status.durationMillis) {
-      setDuration(status.durationMillis / 1000);
-    }
-  }, []);
+  // Track player status with polling
+  useEffect(() => {
+    if (!player) return;
+
+    const interval = setInterval(() => {
+      if (player.duration && player.duration !== duration) {
+        setDuration(player.duration);
+      }
+      if (player.currentTime !== currentTime) {
+        setCurrentTime(player.currentTime);
+      }
+      if (player.playing !== isPlaying) {
+        setIsPlaying(player.playing);
+      }
+    }, 100);
+
+    return () => clearInterval(interval);
+  }, [player, duration, currentTime, isPlaying]);
 
   const clearTimer = useCallback(() => {
     if (timerRef.current) {
@@ -159,7 +174,7 @@ export const VideoLearningSession = ({
       if (nextView !== activeView) {
         setActiveView(nextView);
         if (nextView === 'exercises') {
-          videoRef.current?.pauseAsync().catch(() => undefined);
+          player?.pause();
         }
       }
     },
@@ -167,13 +182,13 @@ export const VideoLearningSession = ({
   );
 
   const togglePlayback = useCallback(() => {
-    if (!videoRef.current) return;
+    if (!player) return;
     if (isPlaying) {
-      videoRef.current.pauseAsync().catch(() => undefined);
+      player.pause();
     } else {
-      videoRef.current.playAsync().catch(() => undefined);
+      player.play();
     }
-  }, [isPlaying]);
+  }, [isPlaying, player]);
 
   const handleVideoPress = useCallback(() => {
     setShowControls((prev) => !prev);
@@ -183,12 +198,6 @@ export const VideoLearningSession = ({
   const currentExercise = content.exercises[currentExerciseIndex];
   const selectedOption = currentExercise ? answers[currentExercise.id] : undefined;
   const progress = duration > 0 ? currentTime / duration : 0;
-
-  // Memoize video source to prevent recreating object
-  const videoSource = useMemo(
-    () => ({ uri: content.videoUrl }),
-    [content.videoUrl]
-  );
 
   // Reset state when content changes
   useEffect(() => {
@@ -201,16 +210,18 @@ export const VideoLearningSession = ({
     setDuration(0);
     clearTimer();
     scrollRef.current?.scrollTo({ y: 0, animated: false });
-    videoRef.current?.setPositionAsync(0).catch(() => undefined);
-    videoRef.current?.playAsync().catch(() => undefined);
-  }, [content.id, clearTimer]);
+    if (player) {
+      player.currentTime = 0;
+      player.play();
+    }
+  }, [content.id, clearTimer, player]);
 
   // Auto play when returning to video view
   useEffect(() => {
-    if (activeView === 'video') {
-      videoRef.current?.playAsync().catch(() => undefined);
+    if (activeView === 'video' && player) {
+      player.play();
     }
-  }, [activeView]);
+  }, [activeView, player]);
 
   // Fade in when content changes
   useEffect(() => {
@@ -247,16 +258,11 @@ export const VideoLearningSession = ({
       >
         {/* VIDEO VIEW */}
         <Pressable style={[styles.videoPage, { height: SCREEN_HEIGHT }]} onPress={handleVideoPress}>
-          <Video
-            ref={(instance) => {
-              videoRef.current = instance;
-            }}
+          <VideoView
+            player={player}
             style={styles.video}
-            source={videoSource}
-            resizeMode={ResizeMode.COVER}
-            shouldPlay
-            isLooping={false}
-            onPlaybackStatusUpdate={handleStatusUpdate}
+            contentFit="cover"
+            nativeControls={false}
           />
 
           {/* Top gradient overlay */}

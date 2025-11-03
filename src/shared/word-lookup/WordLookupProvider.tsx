@@ -1,7 +1,7 @@
 import React, { createContext, useCallback, useContext, useMemo, useRef, useState } from 'react';
 import { Animated, Dimensions, Easing, Platform, Pressable, View, StyleSheet, Text, TouchableOpacity, ScrollView } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { Audio } from 'expo-av';
+import { Audio } from 'expo-audio';
 import * as Haptics from 'expo-haptics';
 
 import { useAppDispatch, useAppSelector } from '@core/store/hooks';

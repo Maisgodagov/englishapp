@@ -10,7 +10,6 @@ import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Typography } from '@shared/ui';
-import { PrimaryButton } from '@shared/ui/button/PrimaryButton';
 import type { Exercise, SubmitAnswerPayload } from '../api/videoLearningApi';
 import { SCREEN_WIDTH, getContentHeight } from '@shared/utils/dimensions';
 const WRONG_FEEDBACK_DELAY = 2000;
@@ -23,6 +22,31 @@ interface ExerciseOverlayProps {
   lastSubmission?: { completed: boolean; correct: number; total: number };
 }
 
+const withAlpha = (color: string | undefined, alphaHex: string) => {
+  if (!color) return undefined;
+  if (color.startsWith('#') && color.length === 7) {
+    return `${color}${alphaHex}`;
+  }
+  if (color.startsWith('#') && color.length === 9) {
+    return color;
+  }
+  return undefined;
+};
+
+const pickOverlayColor = (
+  color: string | undefined,
+  alphaHex: string,
+  fallbackDark: string,
+  fallbackLight: string,
+  isDark: boolean
+) => {
+  const withOpacity = withAlpha(color, alphaHex);
+  if (withOpacity) {
+    return withOpacity;
+  }
+  return isDark ? fallbackDark : fallbackLight;
+};
+
 export const ExerciseOverlay = ({
   exercises,
   onSubmit,
@@ -32,6 +56,109 @@ export const ExerciseOverlay = ({
   const theme = useTheme() as any;
   const insets = useSafeAreaInsets();
   const timerRef = useRef<NodeJS.Timeout | null>(null);
+  const isDark = Boolean(theme?.dark);
+  const primary = theme.colors.primary;
+  const success = theme.colors.success ?? '#22C55E';
+  const danger = theme.colors.danger ?? '#EF4444';
+  const cardBackground = pickOverlayColor(
+    theme.colors.surface,
+    '24',
+    'rgba(255,255,255,0.08)',
+    'rgba(0,0,0,0.06)',
+    isDark
+  );
+  const cardBorder = pickOverlayColor(
+    theme.colors.border,
+    '80',
+    'rgba(255,255,255,0.18)',
+    'rgba(0,0,0,0.12)',
+    isDark
+  );
+  const optionBaseBackground = pickOverlayColor(
+    theme.colors.surface,
+    '1A',
+    'rgba(255,255,255,0.05)',
+    'rgba(0,0,0,0.04)',
+    isDark
+  );
+  const optionBorder = pickOverlayColor(
+    theme.colors.border,
+    '6A',
+    'rgba(255,255,255,0.12)',
+    'rgba(0,0,0,0.08)',
+    isDark
+  );
+  const optionSelectedBackground = pickOverlayColor(
+    primary,
+    '33',
+    'rgba(255,255,255,0.14)',
+    'rgba(0,0,0,0.08)',
+    isDark
+  );
+  const optionBadgeBackground = pickOverlayColor(
+    primary,
+    '28',
+    'rgba(255,255,255,0.12)',
+    'rgba(0,0,0,0.08)',
+    isDark
+  );
+  const optionCorrectBackground = pickOverlayColor(
+    success,
+    '26',
+    'rgba(34,197,94,0.18)',
+    'rgba(34,197,94,0.14)',
+    isDark
+  );
+  const optionDangerBackground = pickOverlayColor(
+    danger,
+    '26',
+    'rgba(239,68,68,0.18)',
+    'rgba(239,68,68,0.14)',
+    isDark
+  );
+  const progressBackdrop = pickOverlayColor(
+    primary,
+    '14',
+    'rgba(255,255,255,0.05)',
+    'rgba(0,0,0,0.04)',
+    isDark
+  );
+  const feedbackSuccessBackground = pickOverlayColor(
+    success,
+    '26',
+    'rgba(34,197,94,0.14)',
+    'rgba(34,197,94,0.12)',
+    isDark
+  );
+  const feedbackDangerBackground = pickOverlayColor(
+    danger,
+    '26',
+    'rgba(239,68,68,0.14)',
+    'rgba(239,68,68,0.12)',
+    isDark
+  );
+  const resultsBackground = pickOverlayColor(
+    theme.colors.surface,
+    '20',
+    'rgba(255,255,255,0.1)',
+    'rgba(0,0,0,0.06)',
+    isDark
+  );
+  const resultsBorder = pickOverlayColor(
+    theme.colors.border,
+    '7F',
+    'rgba(255,255,255,0.18)',
+    'rgba(0,0,0,0.12)',
+    isDark
+  );
+  const inactiveProgressColor = pickOverlayColor(
+    theme.colors.border,
+    '70',
+    'rgba(255,255,255,0.15)',
+    'rgba(0,0,0,0.14)',
+    isDark
+  );
+  const textPrimary = theme.colors.text ?? '#FFFFFF';
 
   const [answers, setAnswers] = useState<Record<string, number>>({});
   const [currentExerciseIndex, setCurrentExerciseIndex] = useState(0);
@@ -86,6 +213,20 @@ export const ExerciseOverlay = ({
 
   const currentExercise = exercises[currentExerciseIndex];
   const selectedOption = currentExercise ? answers[currentExercise.id] : undefined;
+  const totalExercises = exercises.length;
+  const localCorrectCount = useMemo(() => {
+    if (!totalExercises) {
+      return 0;
+    }
+    return exercises.reduce((acc, exercise) => {
+      const selected = answers[exercise.id];
+      return acc + (selected === exercise.correctAnswer ? 1 : 0);
+    }, 0);
+  }, [answers, exercises, totalExercises]);
+  const resultTotal = totalExercises;
+  const resultCorrect = localCorrectCount;
+  const resultCompleted =
+    lastSubmission?.completed ?? (resultTotal > 0 && resultCorrect === resultTotal);
 
   return (
     <View style={[styles.container, { backgroundColor: theme.colors.background, height: SCREEN_HEIGHT }]}>
@@ -96,6 +237,20 @@ export const ExerciseOverlay = ({
       >
         {/* Header */}
         <View style={styles.header}>
+          <View
+            style={[
+              styles.modeBadge,
+              {
+                backgroundColor: progressBackdrop,
+                borderColor: optionBorder,
+              },
+            ]}
+          >
+            <Ionicons name="flash-outline" size={18} color={primary} />
+            <Typography variant="caption" style={[styles.modeBadgeText, { color: primary }]}>
+              Практика
+            </Typography>
+          </View>
           <Typography variant="title" style={styles.title}>
             Упражнения
           </Typography>
@@ -108,27 +263,49 @@ export const ExerciseOverlay = ({
         {currentExercise && !lastSubmission ? (
           <View style={styles.content}>
             {/* Progress indicator */}
-            <View style={styles.progressIndicator}>
-              {exercises.map((_, idx) => (
-                <View
-                  key={idx}
-                  style={[
-                    styles.progressDot,
-                    {
-                      backgroundColor:
-                        idx < currentExerciseIndex
-                          ? theme.colors.success ?? '#22C55E'
-                          : idx === currentExerciseIndex
-                          ? theme.colors.primary
-                          : theme.colors.border,
-                    },
-                  ]}
-                />
-              ))}
+            <View style={styles.progressRow}>
+              <View
+                style={[
+                  styles.progressIndicator,
+                  {
+                    backgroundColor: progressBackdrop,
+                    borderColor: optionBorder,
+                  },
+                ]}
+              >
+                {exercises.map((_, idx) => (
+                  <View
+                    key={idx}
+                    style={[
+                      styles.progressSegment,
+                      {
+                        backgroundColor:
+                          idx < currentExerciseIndex
+                            ? success
+                            : idx === currentExerciseIndex
+                            ? primary
+                            : inactiveProgressColor,
+                        opacity: idx <= currentExerciseIndex ? 1 : 0.45,
+                      },
+                    ]}
+                  />
+                ))}
+              </View>
+              <Typography variant="caption" style={[styles.progressCounter, { color: primary }]}>
+                {currentExerciseIndex + 1}/{exercises.length}
+              </Typography>
             </View>
 
             {/* Question */}
-            <View style={[styles.questionCard, { backgroundColor: theme.colors.surface }]}>
+            <View
+              style={[
+                styles.questionCard,
+                {
+                  backgroundColor: cardBackground,
+                  borderColor: cardBorder,
+                },
+              ]}
+            >
               <Typography variant="body" style={styles.questionNumber}>
                 Вопрос {currentExerciseIndex + 1} из {exercises.length}
               </Typography>
@@ -136,8 +313,16 @@ export const ExerciseOverlay = ({
                 {currentExercise.question}
               </Typography>
               {currentExercise.type === 'vocabulary' && currentExercise.word && (
-                <View style={styles.wordBadge}>
-                  <Typography variant="caption" style={styles.wordText}>
+                <View
+                  style={[
+                    styles.wordBadge,
+                    {
+                      backgroundColor: optionBadgeBackground,
+                      borderColor: optionBorder,
+                    },
+                  ]}
+                >
+                  <Typography variant="caption" style={[styles.wordText, { color: primary }]}>
                     {currentExercise.word}
                   </Typography>
                 </View>
@@ -152,21 +337,34 @@ export const ExerciseOverlay = ({
                 const isCorrectOption = feedback?.correctAnswer === index;
                 const isWrongSelection = showFeedback && isSelected && feedback?.type === 'incorrect';
 
-                let borderColor = theme.colors.border;
-                let backgroundColor = theme.colors.surface;
+                let borderColor = optionBorder;
+                let backgroundColor = optionBaseBackground;
+                let indicatorBackground = optionBadgeBackground;
+                let indicatorBorder = optionBorder;
+                let indicatorColor = primary;
                 let icon: 'checkmark-circle' | 'close-circle' | null = null;
+                let iconColor = primary;
 
                 if (isCorrectOption) {
-                  borderColor = theme.colors.success ?? '#22C55E';
-                  backgroundColor = `${theme.colors.success ?? '#22C55E'}15`;
+                  borderColor = success;
+                  backgroundColor = feedbackSuccessBackground;
+                  indicatorBackground = optionCorrectBackground;
+                  indicatorBorder = success;
+                  indicatorColor = success;
                   icon = 'checkmark-circle';
+                  iconColor = success;
                 } else if (isWrongSelection) {
-                  borderColor = theme.colors.danger ?? '#EF4444';
-                  backgroundColor = `${theme.colors.danger ?? '#EF4444'}15`;
+                  borderColor = danger;
+                  backgroundColor = feedbackDangerBackground;
+                  indicatorBackground = optionDangerBackground;
+                  indicatorBorder = danger;
+                  indicatorColor = danger;
                   icon = 'close-circle';
+                  iconColor = danger;
                 } else if (isSelected) {
-                  borderColor = theme.colors.primary;
-                  backgroundColor = `${theme.colors.primary}10`;
+                  borderColor = primary;
+                  backgroundColor = optionSelectedBackground;
+                  indicatorBorder = primary;
                 }
 
                 return (
@@ -177,21 +375,37 @@ export const ExerciseOverlay = ({
                       {
                         borderColor,
                         backgroundColor,
-                        opacity: isLocked && !isSelected && !isCorrectOption ? 0.5 : 1,
+                        opacity: isLocked && !isSelected && !isCorrectOption ? 0.55 : 1,
                       },
                     ]}
                     onPress={() => handleOptionSelect(index)}
                     disabled={isLocked}
-                    activeOpacity={0.7}
+                    activeOpacity={0.8}
                   >
-                    <Typography variant="body" style={styles.optionText}>
-                      {option}
-                    </Typography>
+                    <View
+                      style={[
+                        styles.optionBadge,
+                        {
+                          backgroundColor: indicatorBackground,
+                          borderColor: indicatorBorder,
+                        },
+                      ]}
+                    >
+                      <Typography variant="caption" style={[styles.optionBadgeText, { color: indicatorColor }]}>
+                        {String.fromCharCode(65 + index)}
+                      </Typography>
+                    </View>
+                    <View style={styles.optionInner}>
+                      <Typography variant="body" style={[styles.optionText, { color: textPrimary }]}>
+                        {option}
+                      </Typography>
+                    </View>
                     {icon && (
                       <Ionicons
                         name={icon}
                         size={24}
-                        color={isCorrectOption ? theme.colors.success ?? '#22C55E' : theme.colors.danger ?? '#EF4444'}
+                        color={iconColor}
+                        style={styles.optionTrailingIcon}
                       />
                     )}
                   </TouchableOpacity>
@@ -207,16 +421,16 @@ export const ExerciseOverlay = ({
                   {
                     backgroundColor:
                       feedback.type === 'correct'
-                        ? `${theme.colors.success ?? '#22C55E'}15`
-                        : `${theme.colors.danger ?? '#EF4444'}15`,
-                    borderColor: feedback.type === 'correct' ? theme.colors.success ?? '#22C55E' : theme.colors.danger ?? '#EF4444',
+                        ? feedbackSuccessBackground
+                        : feedbackDangerBackground,
+                    borderColor: feedback.type === 'correct' ? success : danger,
                   },
                 ]}
               >
                 <Ionicons
                   name={feedback.type === 'correct' ? 'checkmark-circle' : 'close-circle'}
                   size={28}
-                  color={feedback.type === 'correct' ? theme.colors.success ?? '#22C55E' : theme.colors.danger ?? '#EF4444'}
+                  color={feedback.type === 'correct' ? success : danger}
                 />
                 <Typography variant="body" style={styles.feedbackText}>
                   {feedback.type === 'correct' ? 'Отлично! Правильный ответ!' : 'Неправильно, попробуйте ещё раз'}
@@ -229,26 +443,39 @@ export const ExerciseOverlay = ({
         {/* Results */}
         {lastSubmission && (
           <View style={styles.resultsContainer}>
-            <View style={[styles.resultsCard, { backgroundColor: theme.colors.surface }]}>
+            <View
+              style={[
+                styles.resultsCard,
+                {
+                  backgroundColor: resultsBackground,
+                  borderColor: resultsBorder,
+                },
+              ]}
+            >
               <Ionicons
-                name={lastSubmission.completed ? 'trophy' : 'analytics'}
+                name={resultCompleted ? 'trophy' : 'analytics'}
                 size={48}
-                color={lastSubmission.completed ? '#FFD700' : theme.colors.primary}
+                color={resultCompleted ? '#FFD700' : theme.colors.primary}
               />
               <Typography variant="title" style={styles.resultsTitle}>
-                {lastSubmission.completed ? 'Отличная работа!' : 'Хороший результат!'}
+                {resultCompleted ? 'All exercises complete!' : 'Keep practicing!'}
               </Typography>
-              <Typography variant="body" style={styles.resultsScore}>
-                {lastSubmission.correct} из {lastSubmission.total} правильных ответов
+              <Typography variant="body" style={[styles.resultsScore, { color: textPrimary }]}>
+                {resultCorrect} of {resultTotal} correct answers
               </Typography>
               <View style={styles.resultsProgress}>
-                <View style={styles.resultsProgressBar}>
+                <View
+                  style={[
+                    styles.resultsProgressBar,
+                    { backgroundColor: inactiveProgressColor },
+                  ]}
+                >
                   <View
                     style={[
                       styles.resultsProgressFill,
                       {
-                        width: `${(lastSubmission.correct / lastSubmission.total) * 100}%`,
-                        backgroundColor: lastSubmission.completed ? theme.colors.success ?? '#22C55E' : theme.colors.primary,
+                        width: `${resultTotal > 0 ? (resultCorrect / resultTotal) * 100 : 0}%`,
+                        backgroundColor: resultCompleted ? theme.colors.success ?? '#22C55E' : theme.colors.primary,
                       },
                     ]}
                   />
@@ -256,10 +483,18 @@ export const ExerciseOverlay = ({
               </View>
             </View>
 
-            <View style={styles.swipeNextContainer}>
+            <View
+              style={[
+                styles.swipeNextContainer,
+                {
+                  backgroundColor: progressBackdrop,
+                  borderColor: optionBorder,
+                },
+              ]}
+            >
               <Ionicons name="chevron-down" size={32} color={theme.colors.primary} />
-              <Typography variant="subtitle" style={styles.swipeNextText}>
-                Свайпните вниз к следующему видео
+              <Typography variant="subtitle" style={[styles.swipeNextText, { color: textPrimary }]}>
+                Swipe down to return to the feed
               </Typography>
             </View>
           </View>
@@ -272,89 +507,140 @@ export const ExerciseOverlay = ({
 const styles = StyleSheet.create({
   container: {
     width: SCREEN_WIDTH,
+    flex: 1,
   },
   scroll: {
     flex: 1,
   },
   scrollContent: {
-    paddingTop: 60,
-    paddingBottom: 40,
+    paddingTop: 48,
+    paddingBottom: 48,
     paddingHorizontal: 20,
+    gap: 32,
   },
   header: {
-    marginBottom: 24,
+    gap: 12,
+    marginBottom: 12,
+  },
+  modeBadge: {
+    alignSelf: 'flex-start',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 999,
+    borderWidth: 1,
+  },
+  modeBadgeText: {
+    fontWeight: '600',
+    letterSpacing: 0.4,
   },
   title: {
     fontSize: 28,
     fontWeight: '700',
-    marginBottom: 8,
   },
   subtitle: {
-    opacity: 0.6,
+    opacity: 0.65,
   },
   content: {
-    gap: 20,
+    gap: 24,
+  },
+  progressRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
   },
   progressIndicator: {
+    flex: 1,
     flexDirection: 'row',
-    gap: 8,
-    justifyContent: 'center',
-    marginBottom: 8,
+    borderWidth: 1,
+    borderRadius: 999,
+    paddingVertical: 6,
+    paddingHorizontal: 8,
+    gap: 6,
+    alignItems: 'center',
   },
-  progressDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
+  progressSegment: {
+    flex: 1,
+    height: 6,
+    borderRadius: 999,
+  },
+  progressCounter: {
+    fontWeight: '600',
+    letterSpacing: 0.4,
   },
   questionCard: {
-    padding: 20,
-    borderRadius: 16,
+    padding: 24,
+    borderRadius: 20,
     gap: 12,
+    borderWidth: 1,
   },
   questionNumber: {
     opacity: 0.6,
     fontSize: 13,
   },
   questionText: {
-    fontSize: 18,
-    fontWeight: '600',
-    lineHeight: 24,
+    fontSize: 20,
+    fontWeight: '700',
+    lineHeight: 26,
   },
   wordBadge: {
     alignSelf: 'flex-start',
-    backgroundColor: 'rgba(100,100,255,0.15)',
     paddingHorizontal: 12,
     paddingVertical: 6,
-    borderRadius: 8,
-    marginTop: 4,
+    borderRadius: 999,
+    borderWidth: 1,
+    marginTop: 6,
   },
   wordText: {
-    color: '#6464FF',
     fontWeight: '600',
+    letterSpacing: 0.3,
   },
   optionsContainer: {
-    gap: 12,
+    gap: 14,
   },
   option: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingVertical: 16,
-    paddingHorizontal: 16,
-    borderRadius: 12,
-    borderWidth: 2,
+    gap: 14,
+    paddingVertical: 18,
+    paddingHorizontal: 18,
+    borderRadius: 18,
+    borderWidth: 1,
+  },
+  optionInner: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  optionBadge: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+  },
+  optionBadgeText: {
+    fontWeight: '700',
+    fontSize: 14,
   },
   optionText: {
     fontSize: 16,
-    flex: 1,
+    lineHeight: 22,
+    flexShrink: 1,
+  },
+  optionTrailingIcon: {
+    marginLeft: 8,
   },
   feedbackCard: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
     padding: 16,
-    borderRadius: 12,
-    borderWidth: 2,
+    borderRadius: 16,
+    borderWidth: 1,
   },
   feedbackText: {
     flex: 1,
@@ -365,10 +651,12 @@ const styles = StyleSheet.create({
     gap: 32,
   },
   resultsCard: {
-    padding: 32,
-    borderRadius: 20,
+    paddingVertical: 32,
+    paddingHorizontal: 28,
+    borderRadius: 24,
     alignItems: 'center',
     gap: 16,
+    borderWidth: 1,
   },
   resultsTitle: {
     fontSize: 24,
@@ -377,7 +665,7 @@ const styles = StyleSheet.create({
   },
   resultsScore: {
     fontSize: 16,
-    opacity: 0.7,
+    opacity: 0.75,
     textAlign: 'center',
   },
   resultsProgress: {
@@ -386,21 +674,33 @@ const styles = StyleSheet.create({
   },
   resultsProgressBar: {
     width: '100%',
-    height: 8,
-    backgroundColor: 'rgba(0,0,0,0.1)',
-    borderRadius: 4,
+    height: 10,
+    borderRadius: 999,
     overflow: 'hidden',
   },
   resultsProgressFill: {
     height: '100%',
-    borderRadius: 4,
+    borderRadius: 999,
   },
   swipeNextContainer: {
     alignItems: 'center',
-    gap: 8,
+    gap: 10,
+    borderWidth: 1,
+    borderRadius: 16,
+    paddingHorizontal: 20,
+    paddingVertical: 16,
   },
   swipeNextText: {
     textAlign: 'center',
     fontWeight: '600',
+    opacity: 0.85,
   },
 });
+
+
+
+
+
+
+
+
