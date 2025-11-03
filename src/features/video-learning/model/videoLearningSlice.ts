@@ -1,4 +1,4 @@
-import { createAsyncThunk, createSlice, PayloadAction } from '@reduxjs/toolkit';
+import { createAsyncThunk, createSelector, createSlice, PayloadAction } from '@reduxjs/toolkit';
 
 import type { RootState } from '@core/store/store';
 import {
@@ -31,6 +31,9 @@ interface VideoLearningState {
   loadedContents: Record<string, VideoContent>;
   // Track which contents are currently being loaded (to prevent duplicate requests)
   loadingContents: Record<string, boolean>;
+  // Track like toggle in progress per content
+  likesUpdating: Record<string, boolean>;
+  likeErrors: Record<string, string | undefined>;
 }
 
 const initialState: VideoLearningState = {
@@ -47,6 +50,8 @@ const initialState: VideoLearningState = {
   lastSubmission: undefined,
   loadedContents: {},
   loadingContents: {},
+  likesUpdating: {},
+  likeErrors: {},
 };
 
 const requireUserId = (state: RootState) => {
@@ -61,7 +66,7 @@ export const fetchVideoFeed = createAsyncThunk<VideoFeedResponse, void, { state:
   'videoLearning/fetchFeed',
   async (_payload, { getState }) => {
     const userId = requireUserId(getState());
-    return videoLearningApi.getFeed(userId);
+    return videoLearningApi.getFeed(userId, 1);
   },
 );
 
@@ -76,7 +81,7 @@ export const loadMoreVideoFeed = createAsyncThunk<VideoFeedResponse, void, { sta
       throw new Error('No more content to load');
     }
 
-    return videoLearningApi.getFeed(userId, undefined, cursor);
+    return videoLearningApi.getFeed(userId, 2, cursor ?? undefined);
   },
 );
 
@@ -140,6 +145,20 @@ export const submitVideoProgress = createAsyncThunk<
   };
 });
 
+export const updateVideoLike = createAsyncThunk<
+  { contentId: string; likesCount: number; isLiked: boolean },
+  { contentId: string; like: boolean },
+  { state: RootState }
+>('videoLearning/updateLike', async ({ contentId, like }, { getState }) => {
+  const userId = requireUserId(getState());
+  const response = await videoLearningApi.updateLike(userId, contentId, like);
+  return {
+    contentId,
+    likesCount: response.likesCount,
+    isLiked: response.isLiked,
+  };
+});
+
 const videoLearningSlice = createSlice({
   name: 'videoLearning',
   initialState,
@@ -170,6 +189,8 @@ const videoLearningSlice = createSlice({
         state.feedCursor = action.payload.nextCursor;
         state.hasMoreFeed = action.payload.hasMore;
         state.nextContentId = action.payload.items[0]?.id ?? null;
+        state.likesUpdating = {};
+        state.likeErrors = {};
       })
       .addCase(fetchVideoFeed.rejected, (state, action) => {
         state.feedStatus = 'failed';
@@ -180,13 +201,55 @@ const videoLearningSlice = createSlice({
       })
       .addCase(loadMoreVideoFeed.fulfilled, (state, action) => {
         state.isLoadingMore = false;
-        state.feed = [...state.feed, ...action.payload.items];
+        const existingIds = new Set(state.feed.map((item) => item.id));
+        const newItems = action.payload.items.filter((item) => !existingIds.has(item.id));
+        state.feed = [...state.feed, ...newItems];
         state.feedCursor = action.payload.nextCursor;
         state.hasMoreFeed = action.payload.hasMore;
       })
       .addCase(loadMoreVideoFeed.rejected, (state, action) => {
         state.isLoadingMore = false;
         state.error = action.error.message;
+      })
+      .addCase(updateVideoLike.pending, (state, action) => {
+        const { contentId } = action.meta.arg;
+        state.likesUpdating[contentId] = true;
+        state.likeErrors[contentId] = undefined;
+      })
+      .addCase(updateVideoLike.fulfilled, (state, action) => {
+        const { contentId, likesCount, isLiked } = action.payload;
+        state.likesUpdating[contentId] = false;
+        state.likeErrors[contentId] = undefined;
+
+        const feedIndex = state.feed.findIndex((item) => item.id === contentId);
+        if (feedIndex >= 0) {
+          state.feed[feedIndex] = {
+            ...state.feed[feedIndex],
+            likesCount,
+            isLiked,
+          };
+        }
+
+        if (state.loadedContents[contentId]) {
+          state.loadedContents[contentId] = {
+            ...state.loadedContents[contentId],
+            likesCount,
+            isLiked,
+          };
+        }
+
+        if (state.content?.id === contentId) {
+          state.content = {
+            ...state.content,
+            likesCount,
+            isLiked,
+          };
+        }
+      })
+      .addCase(updateVideoLike.rejected, (state, action) => {
+        const { contentId } = action.meta.arg;
+        state.likesUpdating[contentId] = false;
+        state.likeErrors[contentId] = action.error.message;
       })
       .addCase(loadVideoContent.pending, (state, action) => {
         const targetId = action.meta.arg ?? state.nextContentId ?? state.feed[0]?.id ?? null;
@@ -267,10 +330,16 @@ export const selectActiveVideoContent = (state: RootState) => state.videoLearnin
 export const selectVideoContentStatus = (state: RootState) => state.videoLearning.contentStatus;
 export const selectVideoSubmitStatus = (state: RootState) => state.videoLearning.submitStatus;
 export const selectNextContentId = (state: RootState) => state.videoLearning.nextContentId;
-export const selectVideoErrors = (state: RootState) => ({
-  feedError: state.videoLearning.error,
-  submitError: state.videoLearning.submitError,
-});
+export const selectVideoErrors = createSelector(
+  [(state: RootState) => state.videoLearning.error, (state: RootState) => state.videoLearning.submitError],
+  (feedError, submitError) => ({
+    feedError,
+    submitError,
+  })
+);
 export const selectLastSubmission = (state: RootState) => state.videoLearning.lastSubmission;
 export const selectLoadedContents = (state: RootState) => state.videoLearning.loadedContents;
 export const selectLoadingContents = (state: RootState) => state.videoLearning.loadingContents;
+export const selectLikesUpdating = (state: RootState) => state.videoLearning.likesUpdating;
+export const selectLikeErrors = (state: RootState) => state.videoLearning.likeErrors;
+

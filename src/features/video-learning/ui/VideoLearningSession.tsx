@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Animated,
-  Dimensions,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -14,13 +13,12 @@ import { Video, ResizeMode, type AVPlaybackStatus } from 'expo-av';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useTheme } from 'styled-components/native';
 import { Ionicons } from '@expo/vector-icons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Typography } from '@shared/ui';
 import { PrimaryButton } from '@shared/ui/button/PrimaryButton';
 import type { SubmitAnswerPayload, VideoContent } from '../api/videoLearningApi';
-
-const SCREEN_HEIGHT = Dimensions.get('window').height;
-const SCREEN_WIDTH = Dimensions.get('window').width;
+import { SCREEN_WIDTH, getContentHeight } from '@shared/utils/dimensions';
 const WRONG_FEEDBACK_DELAY = 2000;
 const CORRECT_FEEDBACK_DELAY = 800;
 
@@ -40,6 +38,7 @@ export const VideoLearningSession = ({
   onNextVideo,
 }: VideoLearningSessionProps) => {
   const theme = useTheme() as any;
+  const insets = useSafeAreaInsets();
   const videoRef = useRef<Video | null>(null);
   const scrollRef = useRef<ScrollView | null>(null);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
@@ -54,6 +53,12 @@ export const VideoLearningSession = ({
   const [isLocked, setIsLocked] = useState(false);
   const [isPlaying, setIsPlaying] = useState(true);
   const [showControls, setShowControls] = useState(true);
+
+  // Calculate content height excluding safe areas
+  const SCREEN_HEIGHT = useMemo(
+    () => getContentHeight(insets.top, insets.bottom),
+    [insets.top, insets.bottom]
+  );
 
   const transcriptChunks = content.transcription.chunks ?? [];
   const translationChunks = content.translation.chunks ?? [];
@@ -158,7 +163,7 @@ export const VideoLearningSession = ({
         }
       }
     },
-    [activeView],
+    [activeView, SCREEN_HEIGHT],
   );
 
   const togglePlayback = useCallback(() => {
@@ -178,6 +183,12 @@ export const VideoLearningSession = ({
   const currentExercise = content.exercises[currentExerciseIndex];
   const selectedOption = currentExercise ? answers[currentExercise.id] : undefined;
   const progress = duration > 0 ? currentTime / duration : 0;
+
+  // Memoize video source to prevent recreating object
+  const videoSource = useMemo(
+    () => ({ uri: content.videoUrl }),
+    [content.videoUrl]
+  );
 
   // Reset state when content changes
   useEffect(() => {
@@ -235,13 +246,13 @@ export const VideoLearningSession = ({
         onMomentumScrollEnd={handleMomentumScrollEnd}
       >
         {/* VIDEO VIEW */}
-        <Pressable style={styles.videoPage} onPress={handleVideoPress}>
+        <Pressable style={[styles.videoPage, { height: SCREEN_HEIGHT }]} onPress={handleVideoPress}>
           <Video
             ref={(instance) => {
               videoRef.current = instance;
             }}
             style={styles.video}
-            source={{ uri: content.videoUrl }}
+            source={videoSource}
             resizeMode={ResizeMode.COVER}
             shouldPlay
             isLooping={false}
@@ -327,7 +338,7 @@ export const VideoLearningSession = ({
         </Pressable>
 
         {/* EXERCISES VIEW */}
-        <View style={[styles.exercisePage, { backgroundColor: theme.colors.background }]}>
+        <View style={[styles.exercisePage, { backgroundColor: theme.colors.background, height: SCREEN_HEIGHT }]}>
           <ScrollView
             style={styles.exerciseScroll}
             contentContainerStyle={styles.exerciseScrollContent}
@@ -527,7 +538,6 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   videoPage: {
-    height: SCREEN_HEIGHT,
     width: SCREEN_WIDTH,
     backgroundColor: '#000000',
     position: 'relative',
@@ -659,7 +669,6 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFFFFF',
   },
   exercisePage: {
-    height: SCREEN_HEIGHT,
     width: SCREEN_WIDTH,
   },
   exerciseScroll: {

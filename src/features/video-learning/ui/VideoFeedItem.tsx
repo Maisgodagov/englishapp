@@ -1,54 +1,194 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  ActivityIndicator,
   Animated,
-  Dimensions,
+  Platform,
   StyleSheet,
+  TouchableOpacity,
   TouchableWithoutFeedback,
   View,
-} from 'react-native';
-import { Video, ResizeMode, type AVPlaybackStatus } from 'expo-av';
-import { LinearGradient } from 'expo-linear-gradient';
-import { Ionicons } from '@expo/vector-icons';
+  PanResponder,
+} from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { Video, ResizeMode, type AVPlaybackStatus } from "expo-av";
+import { Ionicons } from "@expo/vector-icons";
 
-import { Typography } from '@shared/ui';
-import { useAppSelector, useAppDispatch } from '@core/store/hooks';
-import { selectShowEnglishSubtitles, selectShowRussianSubtitles } from '../model/videoSettingsSlice';
-import { selectGlobalVolume, selectAutoNormalize, selectVideoVolume, setVideoVolume } from '../model/volumeSettingsSlice';
-import type { VideoContent } from '../api/videoLearningApi';
-import { AudioVolumeAnalyzer } from '@shared/utils/audioVolumeAnalyzer';
+import { Typography } from "@shared/ui";
+import { useAppSelector } from "@core/store/hooks";
+import {
+  selectShowEnglishSubtitles,
+  selectShowRussianSubtitles,
+} from "../model/videoSettingsSlice";
+import { selectGlobalVolume } from "../model/volumeSettingsSlice";
+import type { VideoContent } from "../api/videoLearningApi";
+import {
+  SCREEN_WIDTH,
+  WINDOW_HEIGHT,
+  getContentHeight,
+} from "@shared/utils/dimensions";
 
-const SCREEN_HEIGHT = Dimensions.get('window').height;
-const SCREEN_WIDTH = Dimensions.get('window').width;
-const TARGET_NORMALIZED_VOLUME = 0.7;
-const MIN_NORMALIZED_VOLUME = 0.2;
-const MAX_NORMALIZED_VOLUME = 1.0;
-const MIN_AUDIO_REFERENCE = 0.35;
-const CACHE_SMOOTHING_FACTOR = 0.6;
+const DOUBLE_TAP_DELAY = 250;
+const STATUS_TIME_THRESHOLD = 0.12;
+const STATUS_DURATION_THRESHOLD = 0.5;
 
-const clampVolume = (value: number) =>
-  Math.max(MIN_NORMALIZED_VOLUME, Math.min(MAX_NORMALIZED_VOLUME, value));
+// Topic translation map - moved outside component to prevent recreation
+const TOPIC_TRANSLATIONS: Record<string, string> = {
+  // Common topics
+  "travel": "Путешествия",
+  "business": "Бизнес",
+  "technology": "Технологии",
+  "education": "Образование",
+  "health": "Здоровье",
+  "sports": "Спорт",
+  "entertainment": "Развлечения",
+  "food": "Еда",
+  "culture": "Культура",
+  "science": "Наука",
+  "politics": "Политика",
+  "economy": "Экономика",
+  "nature": "Природа",
+  "art": "Искусство",
+  "music": "Музыка",
+  "movies": "Фильмы",
+  "books": "Книги",
+  "history": "История",
+  "geography": "География",
+  "psychology": "Психология",
+  "philosophy": "Философия",
+  "religion": "Религия",
+  "law": "Право",
+  "medicine": "Медицина",
+  "fashion": "Мода",
+  "beauty": "Красота",
+  "lifestyle": "Стиль жизни",
+  "relationships": "Отношения",
+  "family": "Семья",
+  "children": "Дети",
+  "pets": "Питомцы",
+  "home": "Дом",
+  "garden": "Сад",
+  "cooking": "Кулинария",
+  "fitness": "Фитнес",
+  "yoga": "Йога",
+  "meditation": "Медитация",
+  "motivation": "Мотивация",
+  "success": "Успех",
+  "finance": "Финансы",
+  "investment": "Инвестиции",
+  "career": "Карьера",
+  "marketing": "Маркетинг",
+  "sales": "Продажи",
+  "management": "Менеджмент",
+  "leadership": "Лидерство",
+  "communication": "Коммуникация",
+  "languages": "Языки",
+  "grammar": "Грамматика",
+  "vocabulary": "Словарь",
+  "pronunciation": "Произношение",
+  "conversation": "Разговор",
+  "news": "Новости",
+  "events": "События",
+  "social": "Общество",
+  "environment": "Экология",
+  "weather": "Погода",
+  "space": "Космос",
+  "animals": "Животные",
+  "cars": "Автомобили",
+  "aviation": "Авиация",
+  "shipping": "Морское дело",
+  "architecture": "Архитектура",
+  "design": "Дизайн",
+  "photography": "Фотография",
+  "games": "Игры",
+  "hobbies": "Хобби",
+};
 
-const normalizeFromAudioLevel = (audioLevel: number) =>
-  clampVolume(TARGET_NORMALIZED_VOLUME / Math.max(audioLevel, MIN_AUDIO_REFERENCE));
+// Helper function moved outside component to prevent recreation
+const translateTopic = (topic: string): string => {
+  const lowerTopic = topic.toLowerCase();
+  return TOPIC_TRANSLATIONS[lowerTopic] || topic;
+};
+
+// Helper function for level colors - moved outside component
+const getLevelColor = (level: string): string => {
+  switch (level) {
+    case "A1":
+      return "#4CAF50"; // Green
+    case "A2":
+      return "#8BC34A"; // Light Green
+    case "B1":
+      return "#FFC107"; // Amber
+    case "B2":
+      return "#FF9800"; // Orange
+    case "C1":
+      return "#FF5722"; // Deep Orange
+    case "C2":
+      return "#F44336"; // Red
+    default:
+      return "#9E9E9E"; // Grey
+  }
+};
+
+// Helper function to format time as MM:SS
+const formatTime = (seconds: number): string => {
+  const mins = Math.floor(seconds / 60);
+  const secs = Math.floor(seconds % 60);
+  return `${mins}:${secs.toString().padStart(2, '0')}`;
+};
 
 interface VideoFeedItemProps {
   content: VideoContent;
   isActive: boolean;
   isCompleted: boolean;
-  onComplete: () => void;
+  onToggleLike: (videoId: string, nextLike: boolean) => void;
+  isLikePending: boolean;
+  shouldPreload?: boolean;
+  isTabFocused: boolean;
 }
 
-export const VideoFeedItem = ({ content, isActive, isCompleted, onComplete }: VideoFeedItemProps) => {
-  const dispatch = useAppDispatch();
+const VideoFeedItemComponent = ({
+  content,
+  isActive,
+  isCompleted,
+  onToggleLike,
+  isLikePending,
+  shouldPreload = false,
+  isTabFocused,
+}: VideoFeedItemProps) => {
+  const insets = useSafeAreaInsets();
   const videoRef = useRef<Video | null>(null);
   const pauseIconAnim = useRef(new Animated.Value(0)).current;
-  const initialVolumeSet = useRef(false);
+  const doubleTapAnim = useRef(new Animated.Value(0)).current;
+  const lastTapRef = useRef<number>(0);
+  const singleTapTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null
+  );
+  const statusSnapshotRef = useRef({
+    isBuffering: true,
+    isPlaying: false,
+    position: 0,
+    duration: 0,
+  });
+  const isSeekingRef = useRef(false);
+
+  // Calculate content height excluding safe areas
+  const SCREEN_HEIGHT = useMemo(
+    () => getContentHeight(insets.top, insets.bottom),
+    [insets.top, insets.bottom]
+  );
 
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
   const [isBuffering, setIsBuffering] = useState(false);
-  const localVolumeAdjustment = 0;
+  const [isSeeking, setIsSeeking] = useState(false);
+  // Initialize shouldLoad based on shouldPreload prop
+  const [shouldLoad, setShouldLoad] = useState(shouldPreload);
+
+  const updateIsSeeking = useCallback((value: boolean) => {
+    isSeekingRef.current = value;
+    setIsSeeking(value);
+  }, []);
 
   // Get subtitle settings
   const showEnglishSubtitles = useAppSelector(selectShowEnglishSubtitles);
@@ -56,16 +196,14 @@ export const VideoFeedItem = ({ content, isActive, isCompleted, onComplete }: Vi
 
   // Get volume settings
   const globalVolume = useAppSelector(selectGlobalVolume);
-  const autoNormalize = useAppSelector(selectAutoNormalize);
-  const cachedVideoVolume = useAppSelector(selectVideoVolume(content.id));
 
   const transcriptChunks = useMemo(
     () => content.transcription?.chunks ?? [],
-    [content.transcription],
+    [content.transcription]
   );
   const translationChunks = useMemo(
     () => content.translation?.chunks ?? [],
-    [content.translation],
+    [content.translation]
   );
 
   const activeChunkIndex = useMemo(() => {
@@ -103,83 +241,81 @@ export const VideoFeedItem = ({ content, isActive, isCompleted, onComplete }: Vi
     return translationChunks[0] ?? null;
   }, [activeChunkIndex, translationChunks]);
 
-  const baseNormalizedVolume = useMemo(() => {
-    if (!autoNormalize) {
-      return clampVolume(1);
-    }
-
-    if (cachedVideoVolume !== null) {
-      return clampVolume(cachedVideoVolume);
-    }
-
-    if (content.audioLevel !== undefined && content.audioLevel > 0) {
-      return normalizeFromAudioLevel(content.audioLevel);
-    }
-
-    const estimate = AudioVolumeAnalyzer.estimateFromMetadata(
-      content.videoUrl,
-      content.durationSeconds ?? undefined,
-    );
-
-    return clampVolume(estimate.normalizedVolume);
-  }, [autoNormalize, cachedVideoVolume, content.audioLevel, content.durationSeconds, content.videoUrl]);
-
-  const normalizedVolume = useMemo(() => {
-    if (!autoNormalize) {
-      return clampVolume(globalVolume + localVolumeAdjustment);
-    }
-
-    const scaled = baseNormalizedVolume * globalVolume;
-    return clampVolume(scaled + localVolumeAdjustment);
-  }, [autoNormalize, baseNormalizedVolume, globalVolume, localVolumeAdjustment]);
-
+  // Update shouldLoad when shouldPreload changes
   useEffect(() => {
-    if (!autoNormalize) {
-      return;
+    if (shouldPreload && !shouldLoad) {
+      setShouldLoad(true);
     }
+  }, [shouldPreload, shouldLoad]);
 
-    const audioLevel = content.audioLevel;
-    if (audioLevel !== undefined && audioLevel > 0) {
-      const computed = normalizeFromAudioLevel(audioLevel);
-      const current = cachedVideoVolume;
-      const blended =
-        current !== null
-          ? clampVolume(current * CACHE_SMOOTHING_FACTOR + computed * (1 - CACHE_SMOOTHING_FACTOR))
-          : computed;
+  // Reset video state when content changes
+  useEffect(() => {
+    statusSnapshotRef.current = {
+      isBuffering: true,
+      isPlaying: false,
+      position: 0,
+      duration: 0,
+    };
+    isSeekingRef.current = false;
+    setCurrentTime(0);
+    setDuration(0);
+    setIsPlaying(false);
+    setIsBuffering(true);
+    updateIsSeeking(false);
+  }, [content.id, updateIsSeeking]);
 
-      if (current === null || Math.abs(current - blended) > 0.01) {
-        dispatch(setVideoVolume({ videoId: content.id, volume: blended }));
+  useEffect(
+    () => () => {
+      if (singleTapTimeoutRef.current) {
+        clearTimeout(singleTapTimeoutRef.current);
+      }
+    },
+    []
+  );
+
+  const handleStatusUpdate = useCallback((status: AVPlaybackStatus) => {
+    if (!status.isLoaded) {
+      if (!statusSnapshotRef.current.isBuffering) {
+        statusSnapshotRef.current.isBuffering = true;
+        setIsBuffering(true);
       }
       return;
     }
 
-    if (cachedVideoVolume === null) {
-      const estimate = AudioVolumeAnalyzer.estimateFromMetadata(
-        content.videoUrl,
-        content.durationSeconds ?? undefined,
-      );
-      dispatch(setVideoVolume({ videoId: content.id, volume: clampVolume(estimate.normalizedVolume) }));
+    const isCurrentlyBuffering = status.isBuffering ?? false;
+    if (statusSnapshotRef.current.isBuffering !== isCurrentlyBuffering) {
+      statusSnapshotRef.current.isBuffering = isCurrentlyBuffering;
+      setIsBuffering(isCurrentlyBuffering);
     }
-  }, [
-    autoNormalize,
-    cachedVideoVolume,
-    content.audioLevel,
-    content.durationSeconds,
-    content.id,
-    content.videoUrl,
-    dispatch,
-  ]);
 
-  const handleStatusUpdate = useCallback((status: AVPlaybackStatus) => {
-    if (!status.isLoaded) {
-      setIsBuffering(true);
-      return;
+    const nextIsPlaying = Boolean(status.isPlaying);
+    if (statusSnapshotRef.current.isPlaying !== nextIsPlaying) {
+      statusSnapshotRef.current.isPlaying = nextIsPlaying;
+      setIsPlaying(nextIsPlaying);
     }
-    setIsBuffering(false);
-    setCurrentTime(status.positionMillis / 1000);
-    setIsPlaying(status.isPlaying ?? false);
-    if (status.durationMillis) {
-      setDuration(status.durationMillis / 1000);
+
+    if (typeof status.durationMillis === "number") {
+      const nextDuration = status.durationMillis / 1000;
+      if (
+        Math.abs(nextDuration - statusSnapshotRef.current.duration) >=
+        STATUS_DURATION_THRESHOLD
+      ) {
+        setDuration(nextDuration);
+      }
+      statusSnapshotRef.current.duration = nextDuration;
+    }
+
+    if (typeof status.positionMillis === "number") {
+      const nextPosition = status.positionMillis / 1000;
+      const delta = Math.abs(
+        nextPosition - statusSnapshotRef.current.position
+      );
+
+      if (!isSeekingRef.current && delta >= STATUS_TIME_THRESHOLD) {
+        setCurrentTime(nextPosition);
+      }
+
+      statusSnapshotRef.current.position = nextPosition;
     }
   }, []);
 
@@ -208,177 +344,291 @@ export const VideoFeedItem = ({ content, isActive, isCompleted, onComplete }: Vi
   }, [isPlaying, pauseIconAnim]);
 
   // Single tap to pause/play
+  const showDoubleTapLike = useCallback(() => {
+    Animated.sequence([
+      Animated.timing(doubleTapAnim, {
+        toValue: 1,
+        duration: 160,
+        useNativeDriver: true,
+      }),
+      Animated.delay(220),
+      Animated.timing(doubleTapAnim, {
+        toValue: 0,
+        duration: 200,
+        useNativeDriver: true,
+      }),
+    ]).start();
+  }, [doubleTapAnim]);
+
+  const handleDoubleTap = useCallback(() => {
+    if (isLikePending) return;
+    const nextLike = !content.isLiked;
+    onToggleLike(content.id, nextLike);
+    if (nextLike) {
+      showDoubleTapLike();
+    }
+  }, [
+    content.id,
+    content.isLiked,
+    isLikePending,
+    onToggleLike,
+    showDoubleTapLike,
+  ]);
+
   const handleTap = useCallback(() => {
-    togglePlayback();
-  }, [togglePlayback]);
+    const now = Date.now();
+    if (now - lastTapRef.current < DOUBLE_TAP_DELAY) {
+      lastTapRef.current = 0;
+      if (singleTapTimeoutRef.current) {
+        clearTimeout(singleTapTimeoutRef.current);
+        singleTapTimeoutRef.current = null;
+      }
+      handleDoubleTap();
+      return;
+    }
+    lastTapRef.current = now;
+    if (singleTapTimeoutRef.current) {
+      clearTimeout(singleTapTimeoutRef.current);
+    }
+    singleTapTimeoutRef.current = setTimeout(() => {
+      if (lastTapRef.current === now) {
+        togglePlayback();
+        lastTapRef.current = 0;
+      }
+      singleTapTimeoutRef.current = null;
+    }, DOUBLE_TAP_DELAY);
+  }, [handleDoubleTap, togglePlayback]);
+
+  const handleLikePress = useCallback(() => {
+    if (isLikePending) return;
+    onToggleLike(content.id, !content.isLiked);
+  }, [content.id, content.isLiked, isLikePending, onToggleLike]);
 
   const progress = duration > 0 ? currentTime / duration : 0;
 
-  // Установка начальной громкости при загрузке видео
-  useEffect(() => {
-    const setInitialVolume = async () => {
-      if (!initialVolumeSet.current && videoRef.current) {
-        try {
-          await videoRef.current.setVolumeAsync(normalizedVolume);
-          initialVolumeSet.current = true;
-        } catch (error) {
-          console.warn('[VideoVolume] Failed to set initial volume:', error);
-        }
+  // Seek to position
+  const seekToPosition = useCallback(
+    async (position: number) => {
+      if (!videoRef.current || duration === 0) return;
+      const timeMs = Math.max(
+        0,
+        Math.min(position * duration * 1000, duration * 1000)
+      );
+      try {
+        await videoRef.current.setPositionAsync(timeMs);
+        setCurrentTime(timeMs / 1000);
+        statusSnapshotRef.current.position = timeMs / 1000;
+      } catch (error) {
+        console.warn("[VideoSeek] Failed to seek:", error);
       }
-    };
+    },
+    [duration]
+  );
 
-    if (isActive && duration > 0) {
-      setInitialVolume();
-    }
-  }, [isActive, duration, normalizedVolume]);
+  // PanResponder for progress bar scrubbing
+  const panResponder = useMemo(
+    () =>
+      PanResponder.create({
+        onStartShouldSetPanResponder: () => true,
+        onMoveShouldSetPanResponder: () => true,
+        onPanResponderGrant: (evt) => {
+          updateIsSeeking(true);
+          // Use initial touch position for immediate seeking
+          const touchX = evt.nativeEvent.locationX;
+          const position = Math.max(0, Math.min(1, touchX / SCREEN_WIDTH));
+          setCurrentTime(position * duration);
+        },
+        onPanResponderMove: (evt) => {
+          // Use absolute position (x0 + dx) instead of moveX
+          const touchX = evt.nativeEvent.pageX;
+          const position = Math.max(0, Math.min(1, touchX / SCREEN_WIDTH));
+          setCurrentTime(position * duration);
+        },
+        onPanResponderRelease: (evt) => {
+          // Use absolute position for final seek
+          const touchX = evt.nativeEvent.pageX;
+          const position = Math.max(0, Math.min(1, touchX / SCREEN_WIDTH));
+          seekToPosition(position);
+          updateIsSeeking(false);
+        },
+      }),
+    [duration, seekToPosition, updateIsSeeking]
+  );
 
-  // Обновление громкости при изменении настроек
   useEffect(() => {
-    const updateVolume = async () => {
-      if (videoRef.current && initialVolumeSet.current) {
-        try {
-          await videoRef.current.setVolumeAsync(normalizedVolume);
-        } catch (error) {
-          console.warn('[VideoVolume] Failed to update volume:', error);
-        }
+    if (!isActive || !videoRef.current) {
+      return;
+    }
+
+    videoRef.current.setVolumeAsync(globalVolume).catch(() => undefined);
+  }, [content.id, globalVolume, isActive]);
+  // Control playback based on active state and tab focus
+  useEffect(() => {
+    if (!videoRef.current) return;
+
+    const shouldPlay = isActive && isTabFocused;
+
+    // Use timeout to ensure this runs after Video component's shouldPlay prop is processed
+    const timer = setTimeout(() => {
+      if (!videoRef.current) return;
+
+      if (shouldPlay) {
+        videoRef.current.playAsync().catch(() => undefined);
+      } else {
+        videoRef.current.pauseAsync().catch(() => undefined);
       }
-    };
+    }, 50);
 
-    updateVolume();
-  }, [normalizedVolume]);
+    return () => clearTimeout(timer);
+  }, [isActive, isTabFocused, content.id]);
 
-  // Auto play when active
-  useEffect(() => {
-    if (isActive) {
-      videoRef.current?.playAsync().catch(() => undefined);
-    } else {
-      videoRef.current?.pauseAsync().catch(() => undefined);
-    }
-  }, [isActive]);
+  const levelColor = useMemo(
+    () => getLevelColor(content.analysis.cefrLevel),
+    [content.analysis.cefrLevel]
+  );
 
-  // Get level color
-  const getLevelColor = (level: string) => {
-    switch (level) {
-      case 'A1':
-        return '#4CAF50'; // Green
-      case 'A2':
-        return '#8BC34A'; // Light Green
-      case 'B1':
-        return '#FFC107'; // Amber
-      case 'B2':
-        return '#FF9800'; // Orange
-      case 'C1':
-        return '#FF5722'; // Deep Orange
-      case 'C2':
-        return '#F44336'; // Red
-      default:
-        return '#9E9E9E'; // Grey
-    }
-  };
-
-  const levelColor = getLevelColor(content.analysis.cefrLevel);
+  // Memoize video source to prevent recreating object
+  const videoSource = useMemo(
+    () => ({ uri: content.videoUrl }),
+    [content.videoUrl]
+  );
 
   return (
     <TouchableWithoutFeedback onPress={handleTap}>
-      <View style={styles.container}>
-        {/* Modern Header with Material Design */}
-        <LinearGradient
-          colors={['rgba(0, 0, 0, 0.8)', 'rgba(0, 0, 0, 0.4)', 'transparent']}
-          style={styles.headerGradient}
-        >
-          <View style={styles.header}>
-            <View style={styles.headerContent}>
-              {/* Level Badge - Material Design */}
-              <View style={[styles.levelBadge, { backgroundColor: levelColor }]}>
-                <Typography variant="caption" style={styles.levelText}>
-                  {content.analysis.cefrLevel}
+      <View style={[styles.container, { height: SCREEN_HEIGHT }]}>
+        {/* Badges row at the top */}
+        <View style={styles.badgesContainer}>
+          <View style={styles.badgesRow}>
+            {/* Level Badge */}
+            <View style={[styles.badge, styles.levelBadge, { backgroundColor: levelColor }]}>
+              <Typography variant="caption" style={styles.badgeText} enableWordLookup={false}>
+                {content.analysis.cefrLevel}
+              </Typography>
+            </View>
+
+            {/* Topic Badges */}
+            {content.analysis.topics.slice(0, 2).map((topic, idx) => (
+              <View key={idx} style={[styles.badge, styles.topicBadge]}>
+                <Typography variant="caption" style={styles.badgeText} enableWordLookup={false}>
+                  {translateTopic(topic)}
                 </Typography>
               </View>
-
-              {/* Topics - Material Design Chips */}
-              <View style={styles.topicChips}>
-                {content.analysis.topics.slice(0, 2).map((topic, idx) => (
-                  <View key={idx} style={styles.topicChip}>
-                    <Ionicons name="pricetag" size={12} color="rgba(255,255,255,0.9)" />
-                    <Typography variant="caption" style={styles.topicText}>
-                      {topic}
-                    </Typography>
-                  </View>
-                ))}
-              </View>
-            </View>
+            ))}
           </View>
-        </LinearGradient>
+        </View>
+
+        {/* Like button centered on the right */}
+        <View style={styles.likeButtonWrapper}>
+          <TouchableOpacity
+            onPress={handleLikePress}
+            activeOpacity={0.7}
+            style={styles.likeButton}
+          >
+            <Ionicons
+              name={content.isLiked ? "heart" : "heart-outline"}
+              size={44}
+              color={content.isLiked ? "#E11D48" : "#FFFFFF"}
+            />
+          </TouchableOpacity>
+          <Typography
+            variant="body"
+            style={[
+              styles.likeCount,
+              content.isLiked ? styles.likeCountActive : undefined,
+            ]}
+            enableWordLookup={false}
+          >
+            {content.likesCount}
+          </Typography>
+        </View>
 
         {/* Video container with black background */}
         <View style={styles.videoContainer}>
-          <Video
-            ref={(instance) => {
-              videoRef.current = instance;
-            }}
-            style={styles.video}
-            source={{ uri: content.videoUrl }}
-            resizeMode={ResizeMode.CONTAIN}
-            posterResizeMode={ResizeMode.CONTAIN}
-            shouldPlay={false}
-            isLooping={false}
-            onPlaybackStatusUpdate={handleStatusUpdate}
-            useNativeControls={false}
-            videoStyle={styles.videoInner}
-          />
+          {shouldLoad ? (
+            <Video
+              ref={(instance) => {
+                videoRef.current = instance;
+              }}
+              style={[styles.video, { width: SCREEN_WIDTH, height: SCREEN_HEIGHT }]}
+              source={videoSource}
+              resizeMode={ResizeMode.CONTAIN}
+              shouldPlay={isActive && isTabFocused}
+              isLooping={true}
+              onPlaybackStatusUpdate={handleStatusUpdate}
+              useNativeControls={false}
+              videoStyle={[styles.videoInner, { width: SCREEN_WIDTH, height: SCREEN_HEIGHT }]}
+            />
+          ) : (
+            <View style={[styles.video, { width: SCREEN_WIDTH, height: SCREEN_HEIGHT, backgroundColor: '#000' }]} />
+          )}
         </View>
 
-        {/* Buffering indicator */}
-        {isBuffering && (
+        {/* Buffering indicator - only show when video is loading but not playing */}
+        {shouldLoad && isBuffering && !isPlaying && (
           <View style={styles.bufferingContainer}>
             <View style={styles.bufferingSpinner}>
-              <Ionicons name="reload-circle" size={48} color="#FFFFFF" />
+              <ActivityIndicator size="large" color="#FFFFFF" />
             </View>
           </View>
         )}
 
-        {/* Bottom gradient overlay */}
-        <LinearGradient
-          colors={['transparent', 'rgba(0,0,0,0.4)', 'rgba(0,0,0,0.8)']}
-          style={styles.bottomGradient}
+        <Animated.View
+          pointerEvents="none"
+          style={[
+            styles.doubleTapHeart,
+            {
+              opacity: doubleTapAnim,
+              transform: [
+                {
+                  scale: doubleTapAnim.interpolate({
+                    inputRange: [0, 1],
+                    outputRange: [0.7, 1.25],
+                  }),
+                },
+              ],
+            },
+          ]}
+        >
+          <Ionicons name="heart" size={96} color="#E11D48" />
+        </Animated.View>
+
+        {/* Bottom overlay */}
+        <View
+          style={[
+            styles.bottomGradient,
+            { paddingBottom: Math.max(insets.bottom + 60, 80) },
+          ]}
           pointerEvents="box-none"
         >
           {/* Subtitles with reduced transparency */}
-          {((showEnglishSubtitles && activeTranscript) || (showRussianSubtitles && activeTranslation)) && (
+          {((showEnglishSubtitles && activeTranscript) ||
+            (showRussianSubtitles && activeTranslation)) && (
             <View style={styles.subtitleContainer}>
               {showEnglishSubtitles && activeTranscript && (
                 <View style={styles.subtitleBox}>
-                  <Typography variant="subtitle" style={styles.subtitleEn}>
+                  <Typography variant="body" style={styles.subtitleEn} enableWordLookup={true}>
                     {activeTranscript.text}
                   </Typography>
                 </View>
               )}
               {showRussianSubtitles && activeTranslation && (
                 <View style={[styles.subtitleBox, styles.subtitleBoxRu]}>
-                  <Typography variant="body" style={styles.subtitleRu}>
+                  <Typography variant="body" style={styles.subtitleRu} enableWordLookup={false}>
                     {activeTranslation.text}
                   </Typography>
                 </View>
               )}
             </View>
           )}
+        </View>
 
-          {/* Swipe indicator */}
-          <View style={styles.swipeIndicator}>
-            <Ionicons name="chevron-down" size={24} color="rgba(255,255,255,0.7)" />
-            <Typography variant="caption" style={styles.swipeText}>
-              Свайпните вниз для упражнений
-            </Typography>
-          </View>
-        </LinearGradient>
-
-        {/* Completed badge - Material Design */}
+        {/* Completed badge - Compact */}
         {isCompleted && (
           <View style={styles.completedBadge}>
             <View style={styles.completedBadgeInner}>
-              <Ionicons name="checkmark-circle" size={24} color="#4CAF50" />
+              <Ionicons name="checkmark-circle" size={16} color="#4CAF50" />
               <Typography variant="caption" style={styles.completedText}>
-                Пройдено
+                Просмотренно
               </Typography>
             </View>
           </View>
@@ -403,20 +653,31 @@ export const VideoFeedItem = ({ content, isActive, isCompleted, onComplete }: Vi
           pointerEvents="none"
         >
           <View style={styles.iconBackground}>
-            <Ionicons name={isPlaying ? 'pause' : 'play'} size={56} color="#FFFFFF" />
+            <Ionicons
+              name={isPlaying ? "pause" : "play"}
+              size={56}
+              color="#FFFFFF"
+            />
           </View>
         </Animated.View>
 
-        {/* Progress bar */}
-        <View style={styles.progressBarContainer}>
+        {/* Progress bar with scrubbing */}
+        <View style={styles.progressBarContainer} {...panResponder.panHandlers}>
           <View style={styles.progressBar}>
-            <LinearGradient
-              colors={['#FF6B6B', '#4ECDC4', '#45B7D1']}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 0 }}
+            <View
               style={[styles.progressFill, { width: `${progress * 100}%` }]}
             />
           </View>
+          {isSeeking && (
+            <>
+              <View style={[styles.seekThumb, { left: `${progress * 100}%` }]} />
+              <View style={[styles.timeCodeContainer, { left: `${progress * 100}%` }]}>
+                <Typography variant="caption" style={styles.timeCodeText}>
+                  {formatTime(currentTime)} / {formatTime(duration)}
+                </Typography>
+              </View>
+            </>
+          )}
         </View>
       </View>
     </TouchableWithoutFeedback>
@@ -425,145 +686,162 @@ export const VideoFeedItem = ({ content, isActive, isCompleted, onComplete }: Vi
 
 const styles = StyleSheet.create({
   container: {
-    height: SCREEN_HEIGHT,
     width: SCREEN_WIDTH,
-    backgroundColor: '#000000',
-    position: 'relative',
+    backgroundColor: "#000000",
+    position: "relative",
   },
-  headerGradient: {
-    position: 'absolute',
-    top: 0,
+  badgesContainer: {
+    position: "absolute",
     left: 0,
     right: 0,
-    zIndex: 10,
-    paddingTop: 50,
-    paddingBottom: 20,
+    paddingHorizontal: 12,
+    paddingTop: 17,
+    paddingBottom: 8,
+    zIndex: 100,
   },
-  header: {
-    paddingHorizontal: 16,
+  badgesRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    flexWrap: "wrap",
   },
-  headerContent: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    flexWrap: 'wrap',
+  badge: {
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 14,
+    elevation: 3,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.4,
+    shadowRadius: 3,
+  },
+  badgeText: {
+    color: "#FFFFFF",
+    fontWeight: "700",
+    fontSize: 11,
+    letterSpacing: 0.2,
+    includeFontPadding: false,
+    fontFamily: Platform.select({
+      ios: 'System',
+      android: 'Roboto',
+    }),
+  },
+  likeButtonWrapper: {
+    position: "absolute",
+    right: 8,
+    top: "50%",
+    transform: [{ translateY: -44 }], // Half of button (32) + text height (~12)
+    alignItems: "center",
+    zIndex: 100,
+  },
+  likeButton: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "transparent",
+  },
+  likeCount: {
+    color: "#F5F5F5",
+    fontWeight: "700",
+    fontSize: 12,
+    letterSpacing: 0.2,
+    marginTop: -12,
+    includeFontPadding: false,
+    fontFamily: Platform.select({
+      ios: 'System',
+      android: 'Roboto',
+    }),
+  },
+  likeCountActive: {
+    color: "#E11D48",
   },
   videoContainer: {
     flex: 1,
-    width: '100%',
-    backgroundColor: '#000000',
-    alignItems: 'center',
-    justifyContent: 'flex-start',
+    width: "100%",
+    backgroundColor: "#000000",
+    alignItems: "center",
+    justifyContent: "flex-start",
   },
   video: {
-    width: SCREEN_WIDTH,
-    height: SCREEN_HEIGHT,
+    width: "100%",
+    height: "100%",
   },
   videoInner: {
-    width: SCREEN_WIDTH,
-    height: SCREEN_HEIGHT,
+    width: "100%",
+    height: "100%",
   },
   bufferingContainer: {
-    position: 'absolute',
+    position: "absolute",
     top: 0,
     left: 0,
     right: 0,
     bottom: 0,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: 'rgba(0, 0, 0, 0.3)',
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(0, 0, 0, 0.3)",
   },
   bufferingSpinner: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
-    backgroundColor: 'rgba(0, 0, 0, 0.6)',
-    alignItems: 'center',
-    justifyContent: 'center',
+    width: 100,
+    height: 100,
+    borderRadius: 50,
+    backgroundColor: "rgba(0, 0, 0, 0.7)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  doubleTapHeart: {
+    position: "absolute",
+    top: "40%",
+    left: "50%",
+    marginLeft: -48,
+    marginTop: -48,
+    zIndex: 15,
   },
   bottomGradient: {
-    position: 'absolute',
+    position: "absolute",
     bottom: 0,
     left: 0,
     right: 0,
-    height: 300,
-    justifyContent: 'flex-end',
-    paddingBottom: 40,
+    backgroundColor: "transparent",
+    justifyContent: "flex-end",
     paddingHorizontal: 20,
   },
-  // Level Badge - Material Design Style
+  // Badge variants
   levelBadge: {
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 20,
-    elevation: 4,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.3,
-    shadowRadius: 4,
+    // backgroundColor set dynamically based on CEFR level
   },
-  levelText: {
-    color: '#FFFFFF',
-    fontWeight: '700',
-    fontSize: 14,
-    letterSpacing: 0.5,
+  topicBadge: {
+    backgroundColor: "rgba(255, 255, 255, 0.25)",
   },
-  // Topic Chips - Material Design
-  topicChips: {
-    flexDirection: 'row',
-    gap: 8,
-    flexWrap: 'wrap',
-    flex: 1,
-  },
-  topicChip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    backgroundColor: 'rgba(255, 255, 255, 0.25)',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 16,
-    backdropFilter: 'blur(10px)',
-    elevation: 2,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.2,
-    shadowRadius: 2,
-  },
-  topicText: {
-    color: 'rgba(255, 255, 255, 0.95)',
-    fontSize: 12,
-    fontWeight: '600',
-    letterSpacing: 0.3,
-  },
-  // Completed Badge - Material Design
+  // Completed Badge - Compact
   completedBadge: {
-    position: 'absolute',
-    top: 120,
-    right: 16,
+    position: "absolute",
+    top: 100,
+    right: 12,
     zIndex: 11,
   },
   completedBadgeInner: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    backgroundColor: 'rgba(76, 175, 80, 0.2)',
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 20,
-    borderWidth: 2,
-    borderColor: '#4CAF50',
-    elevation: 4,
-    shadowColor: '#4CAF50',
-    shadowOffset: { width: 0, height: 2 },
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    backgroundColor: "rgba(76, 175, 80, 0.2)",
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 12,
+    borderWidth: 1.5,
+    borderColor: "#4CAF50",
+    elevation: 2,
+    shadowColor: "#4CAF50",
+    shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.4,
-    shadowRadius: 4,
+    shadowRadius: 2,
   },
   completedText: {
-    color: '#4CAF50',
-    fontWeight: '700',
-    fontSize: 12,
-    letterSpacing: 0.3,
+    color: "#4CAF50",
+    fontWeight: "700",
+    fontSize: 10,
+    letterSpacing: 0.2,
   },
   // Subtitles - Less transparent
   subtitleContainer: {
@@ -571,48 +849,46 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   subtitleBox: {
-    backgroundColor: 'rgba(0, 0, 0, 0.90)', // Increased from 0.75
+    backgroundColor: "rgba(0, 0, 0, 0.90)",
     paddingVertical: 14,
     paddingHorizontal: 18,
-    borderRadius: 12,
-    alignSelf: 'center',
-    maxWidth: '90%',
+    borderRadius: 16,
+    alignSelf: "center",
+    maxWidth: "90%",
     elevation: 4,
-    shadowColor: '#000',
+    shadowColor: "#000",
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.5,
     shadowRadius: 4,
   },
   subtitleBoxRu: {
-    backgroundColor: 'rgba(0, 0, 0, 0.85)', // Increased from 0.6
+    backgroundColor: "rgba(0, 0, 0, 0.85)",
   },
   subtitleEn: {
-    color: '#FFFFFF',
+    color: "#FFFFFF",
     fontSize: 18,
-    fontWeight: '600',
-    textAlign: 'center',
-    lineHeight: 26,
+    fontWeight: "600",
+    textAlign: "center",
+    includeFontPadding: false,
+    fontFamily: Platform.select({
+      ios: 'System',
+      android: 'Roboto',
+    }),
   },
   subtitleRu: {
-    color: '#F0F0F0',
+    color: "#F0F0F0",
     fontSize: 15,
-    textAlign: 'center',
-    lineHeight: 22,
-  },
-  swipeIndicator: {
-    alignItems: 'center',
-    marginTop: 12,
-    opacity: 0.8,
-  },
-  swipeText: {
-    color: 'rgba(255,255,255,0.7)',
-    fontSize: 12,
-    marginTop: 4,
+    textAlign: "center",
+    includeFontPadding: false,
+    fontFamily: Platform.select({
+      ios: 'System',
+      android: 'Roboto',
+    }),
   },
   centerIcon: {
-    position: 'absolute',
-    top: '50%',
-    left: '50%',
+    position: "absolute",
+    top: "50%",
+    left: "50%",
     marginTop: -60,
     marginLeft: -60,
   },
@@ -620,27 +896,109 @@ const styles = StyleSheet.create({
     width: 120,
     height: 120,
     borderRadius: 60,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: 'rgba(0, 0, 0, 0.65)',
-    elevation: 8,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.5,
-    shadowRadius: 8,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(0, 0, 0, 0.65)",
   },
   progressBarContainer: {
-    position: 'absolute',
-    bottom: 0,
+    position: "absolute",
+    bottom: 45,
     left: 0,
     right: 0,
-    height: 4,
+    height: 20,
+    justifyContent: "center",
+    paddingHorizontal: 0,
   },
   progressBar: {
-    flex: 1,
-    backgroundColor: 'rgba(255,255,255,0.2)',
+    height: 4,
+    backgroundColor: "rgba(255,255,255,0.2)",
   },
   progressFill: {
-    height: '100%',
+    height: "100%",
+    backgroundColor: "#4ECDC4",
+  },
+  seekThumb: {
+    position: "absolute",
+    top: "50%",
+    width: 16,
+    height: 16,
+    borderRadius: 8,
+    backgroundColor: "#FFFFFF",
+    marginTop: -8,
+    marginLeft: -8,
+    elevation: 4,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.5,
+    shadowRadius: 4,
+  },
+  timeCodeContainer: {
+    position: "absolute",
+    bottom: 30,
+    backgroundColor: "rgba(0, 0, 0, 0.8)",
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 6,
+    marginLeft: -40,
+  },
+  timeCodeText: {
+    color: "#FFFFFF",
+    fontSize: 12,
+    fontWeight: "600",
   },
 });
+
+const areVideoContentsEqual = (
+  prevContent: VideoContent,
+  nextContent: VideoContent
+) => {
+  if (prevContent === nextContent) {
+    return true;
+  }
+
+  if (prevContent.id !== nextContent.id) return false;
+  if (prevContent.videoUrl !== nextContent.videoUrl) return false;
+  if (prevContent.isLiked !== nextContent.isLiked) return false;
+  if (prevContent.likesCount !== nextContent.likesCount) return false;
+  if (prevContent.audioLevel !== nextContent.audioLevel) return false;
+  if (prevContent.durationSeconds !== nextContent.durationSeconds) return false;
+  if (prevContent.transcription !== nextContent.transcription) return false;
+  if (prevContent.translation !== nextContent.translation) return false;
+
+  const prevAnalysis = prevContent.analysis;
+  const nextAnalysis = nextContent.analysis;
+
+  if (prevAnalysis?.cefrLevel !== nextAnalysis?.cefrLevel) return false;
+
+  const prevTopics = prevAnalysis?.topics ?? [];
+  const nextTopics = nextAnalysis?.topics ?? [];
+
+  if (prevTopics.length !== nextTopics.length) return false;
+  for (let i = 0; i < prevTopics.length; i += 1) {
+    if (prevTopics[i] !== nextTopics[i]) {
+      return false;
+    }
+  }
+
+  return true;
+};
+
+const areVideoFeedItemPropsEqual = (
+  prev: VideoFeedItemProps,
+  next: VideoFeedItemProps
+) => {
+  if (prev.isActive !== next.isActive) return false;
+  if (prev.isCompleted !== next.isCompleted) return false;
+  if (prev.isLikePending !== next.isLikePending) return false;
+  if (prev.shouldPreload !== next.shouldPreload) return false;
+  if (prev.isTabFocused !== next.isTabFocused) return false;
+  if (prev.onToggleLike !== next.onToggleLike) return false;
+  if (!areVideoContentsEqual(prev.content, next.content)) return false;
+  return true;
+};
+
+export const VideoFeedItem = memo(
+  VideoFeedItemComponent,
+  areVideoFeedItemPropsEqual
+);
+VideoFeedItem.displayName = "VideoFeedItem";

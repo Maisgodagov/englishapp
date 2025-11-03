@@ -1,7 +1,8 @@
 import type { ReactNode } from 'react';
-import { TouchableOpacity, Text, StyleSheet, ViewStyle } from 'react-native';
+import { TouchableOpacity, StyleSheet, ViewStyle } from 'react-native';
 import { useTheme } from 'styled-components/native';
 import type { AppTheme } from '@shared/theme/theme';
+import { Typography } from '../typography/Typography';
 
 export type TextButtonProps = {
   children?: ReactNode;
@@ -24,7 +25,8 @@ export const TextButton = ({
       onPress={onPress}
       disabled={disabled}
     >
-      <Text
+      <Typography
+        variant="caption"
         style={[
           styles.text,
           { color: theme.colors.primary },
@@ -32,7 +34,7 @@ export const TextButton = ({
         ]}
       >
         {children}
-      </Text>
+      </Typography>
     </TouchableOpacity>
   );
 };

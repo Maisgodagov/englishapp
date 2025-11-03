@@ -1,4 +1,4 @@
-import { createSlice, PayloadAction } from '@reduxjs/toolkit';
+import { createSelector, createSlice, PayloadAction } from '@reduxjs/toolkit';
 import type { RootState } from '@core/store/store';
 
 interface VolumeSettingsState {
@@ -55,6 +55,20 @@ export const volumeSettingsReducer = volumeSettingsSlice.reducer;
 export const selectGlobalVolume = (state: RootState) => state.volumeSettings.globalVolume;
 export const selectAutoNormalize = (state: RootState) => state.volumeSettings.autoNormalize;
 export const selectVideoVolumeCache = (state: RootState) => state.volumeSettings.videoVolumeCache;
-export const selectVideoVolume = (videoId: string) => (state: RootState) =>
-  state.volumeSettings.videoVolumeCache[videoId] ?? null;
-export const selectVolumeSettings = (state: RootState) => state.volumeSettings;
+
+// Memoized selector factory for individual video volume
+export const selectVideoVolume = (videoId: string) =>
+  createSelector(
+    [selectVideoVolumeCache],
+    (cache) => cache[videoId] ?? null
+  );
+
+// Memoized selector for all volume settings
+export const selectVolumeSettings = createSelector(
+  [selectGlobalVolume, selectAutoNormalize, selectVideoVolumeCache],
+  (globalVolume, autoNormalize, videoVolumeCache) => ({
+    globalVolume,
+    autoNormalize,
+    videoVolumeCache,
+  })
+);

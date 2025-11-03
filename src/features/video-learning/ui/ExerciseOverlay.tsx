@@ -1,6 +1,5 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, useMemo } from 'react';
 import {
-  Dimensions,
   ScrollView,
   StyleSheet,
   TouchableOpacity,
@@ -8,13 +7,12 @@ import {
 } from 'react-native';
 import { useTheme } from 'styled-components/native';
 import { Ionicons } from '@expo/vector-icons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Typography } from '@shared/ui';
 import { PrimaryButton } from '@shared/ui/button/PrimaryButton';
 import type { Exercise, SubmitAnswerPayload } from '../api/videoLearningApi';
-
-const SCREEN_HEIGHT = Dimensions.get('window').height;
-const SCREEN_WIDTH = Dimensions.get('window').width;
+import { SCREEN_WIDTH, getContentHeight } from '@shared/utils/dimensions';
 const WRONG_FEEDBACK_DELAY = 2000;
 const CORRECT_FEEDBACK_DELAY = 800;
 
@@ -32,12 +30,19 @@ export const ExerciseOverlay = ({
   lastSubmission
 }: ExerciseOverlayProps) => {
   const theme = useTheme() as any;
+  const insets = useSafeAreaInsets();
   const timerRef = useRef<NodeJS.Timeout | null>(null);
 
   const [answers, setAnswers] = useState<Record<string, number>>({});
   const [currentExerciseIndex, setCurrentExerciseIndex] = useState(0);
   const [feedback, setFeedback] = useState<{ type: 'correct' | 'incorrect'; correctAnswer?: number } | null>(null);
   const [isLocked, setIsLocked] = useState(false);
+
+  // Calculate content height excluding safe areas
+  const SCREEN_HEIGHT = useMemo(
+    () => getContentHeight(insets.top, insets.bottom),
+    [insets.top, insets.bottom]
+  );
 
   const clearTimer = useCallback(() => {
     if (timerRef.current) {
@@ -83,7 +88,7 @@ export const ExerciseOverlay = ({
   const selectedOption = currentExercise ? answers[currentExercise.id] : undefined;
 
   return (
-    <View style={[styles.container, { backgroundColor: theme.colors.background }]}>
+    <View style={[styles.container, { backgroundColor: theme.colors.background, height: SCREEN_HEIGHT }]}>
       <ScrollView
         style={styles.scroll}
         contentContainerStyle={styles.scrollContent}
@@ -266,7 +271,6 @@ export const ExerciseOverlay = ({
 
 const styles = StyleSheet.create({
   container: {
-    height: SCREEN_HEIGHT,
     width: SCREEN_WIDTH,
   },
   scroll: {

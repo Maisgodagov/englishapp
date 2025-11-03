@@ -1,7 +1,8 @@
 import { useState } from 'react';
-import { View, TextInput, Text, StyleSheet, TouchableOpacity } from 'react-native';
+import { View, TextInput, StyleSheet, TouchableOpacity } from 'react-native';
 import { useTheme } from 'styled-components/native';
 import type { AppTheme } from '@shared/theme/theme';
+import { Typography } from '../typography/Typography';
 
 export type InputProps = {
   label?: string;
@@ -38,7 +39,7 @@ export const Input = ({
 
   return (
     <View style={styles.container}>
-      {label && <Text style={[styles.label, { color: theme.colors.text }]}>{label}</Text>}
+      {label && <Typography variant="caption" style={[styles.label, { color: theme.colors.text }]}>{label}</Typography>}
       <View style={styles.inputWrapper}>
         <TextInput
           style={[
@@ -68,11 +69,11 @@ export const Input = ({
         />
         {secureTextEntry && (
           <TouchableOpacity style={styles.eyeButton} onPress={handleTogglePassword}>
-            <Text style={styles.eyeIcon}>{isPasswordVisible ? '👁️' : '👁️‍🗨️'}</Text>
+            <Typography variant="body" style={styles.eyeIcon}>{isPasswordVisible ? '👁️' : '👁️‍🗨️'}</Typography>
           </TouchableOpacity>
         )}
       </View>
-      {error && <Text style={[styles.error, { color: theme.colors.danger }]}>{error}</Text>}
+      {error && <Typography variant="caption" style={[styles.error, { color: theme.colors.danger }]}>{error}</Typography>}
     </View>
   );
 };

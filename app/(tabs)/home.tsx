@@ -1,35 +1,28 @@
-import { useEffect, useMemo } from "react";
-import { View, StyleSheet, ScrollView } from "react-native";
+import { useMemo, useRef } from "react";
+import { View, StyleSheet, ScrollView, TouchableOpacity } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import Ionicons from "@expo/vector-icons/Ionicons";
 import { useTheme } from "styled-components/native";
+import Ionicons from "@expo/vector-icons/Ionicons";
 
-import { useAppDispatch, useAppSelector } from "@core/store/hooks";
+import { useAppSelector } from "@core/store/hooks";
 import { Typography } from "@shared/ui";
-import {
-  fetchRoadmap,
-  selectRoadmapError,
-  selectRoadmapModules,
-  selectRoadmapStatus,
-} from "@features/roadmap/model/roadmapSlice";
-import { RoadmapTrack } from "@features/roadmap/ui/RoadmapTrack";
+import { useWordLookup } from "@shared/word-lookup/WordLookupProvider";
 
 export default function HomeScreen() {
-  const dispatch = useAppDispatch();
-  const profile = useAppSelector((s) => s.user.profile);
-  const modules = useAppSelector(selectRoadmapModules);
-  const roadmapStatus = useAppSelector(selectRoadmapStatus);
-  const roadmapError = useAppSelector(selectRoadmapError);
   const theme = useTheme();
-
-  useEffect(() => {
-    if (roadmapStatus === "idle") {
-      dispatch(fetchRoadmap());
-    }
-  }, [dispatch, roadmapStatus]);
-
+  const profile = useAppSelector((s) => s.user.profile);
   const styles = useMemo(() => getStyles(theme), [theme]);
-  const isLoading = roadmapStatus === "loading";
+  const { open } = useWordLookup();
+  const buttonRef = useRef<View>(null);
+
+  const testWordLookup = () => {
+    (buttonRef.current as any)?.measureInWindow(
+      (x: number, y: number, w: number, h: number) => {
+        // Якорь в центре снизу кнопки
+        open("test", { x: x + w / 2, y: y + h });
+      }
+    );
+  };
 
   return (
     <SafeAreaView style={styles.container} edges={["top"]}>
@@ -59,25 +52,55 @@ export default function HomeScreen() {
 
       <ScrollView style={styles.scrollView}>
         <View style={styles.content}>
-          {isLoading && (
-            <View style={styles.stateCard}>
-              <Typography variant="body" align="center">
-                {"Загружаем ваш путь..."}
-              </Typography>
-            </View>
-          )}
+          <Typography variant="title" align="center">
+            Главная страница
+          </Typography>
 
-          {!isLoading && roadmapError && (
-            <View style={styles.stateCard}>
-              <Typography variant="body" align="center" style={styles.errorText}>
-                {roadmapError}
-              </Typography>
-            </View>
-          )}
+          <TouchableOpacity
+            ref={buttonRef}
+            onPress={testWordLookup}
+            style={{ padding: 20, backgroundColor: "#1E88E5", borderRadius: 8 }}
+          >
+            <Typography variant="body" style={{ color: "#FFF" }}>
+              Тест поповера (нажми)
+            </Typography>
+          </TouchableOpacity>
 
-          {!isLoading && !roadmapError && modules.length > 0 && (
-            <RoadmapTrack modules={modules} />
-          )}
+          <Typography
+            enableWordLookup
+            variant="body"
+            align="center"
+            style={styles.placeholder}
+          >
+            test for know if fuck,
+          </Typography>
+          <Typography
+            enableWordLookup
+            variant="body"
+            align="center"
+            style={styles.placeholder}
+          >
+            test" 349г @ ofjo"£$%&9 0934 for know if fuck,
+          </Typography>
+          <Typography
+            enableWordLookup
+            variant="body"
+            align="center"
+            style={styles.placeholder}
+          >
+            Lorem ipsum dolor, sit amet consectetur adipisicing elit. Nostrum
+            esse fugit officiis, expedita amet quisquam aut adipisci assumenda
+            laudantium maiores minima doloremque soluta libero dolore voluptas
+            debitis mollitia incidunt voluptates?
+          </Typography>
+          <Typography
+            enableWordLookup
+            variant="body"
+            align="center"
+            style={styles.placeholder}
+          >
+            don't ask and dont talk just shut your bitch ass up
+          </Typography>
         </View>
       </ScrollView>
     </SafeAreaView>
@@ -111,7 +134,6 @@ const getStyles = (theme: any) =>
     },
     statValue: {
       fontWeight: "600",
-      color: theme.colors.text,
       fontSize: 14,
     },
     scrollView: {
@@ -119,17 +141,12 @@ const getStyles = (theme: any) =>
     },
     content: {
       padding: 20,
-      gap: 32,
+      gap: 20,
+      flex: 1,
+      justifyContent: "center",
+      alignItems: "center",
     },
-    stateCard: {
-      paddingVertical: 32,
-      paddingHorizontal: 20,
-      borderRadius: 16,
-      borderWidth: 1,
-      borderColor: theme.colors.border,
-      backgroundColor: theme.colors.surface,
-    },
-    errorText: {
-      color: theme.colors.danger,
+    placeholder: {
+      color: theme.colors.textSecondary,
     },
   });

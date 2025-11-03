@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react';
-import { TouchableOpacity, Text, StyleSheet, ViewStyle } from 'react-native';
+import { TouchableOpacity, StyleSheet, ViewStyle } from 'react-native';
+import { Typography } from '../typography/Typography';
 
 export type PrimaryButtonProps = {
   children?: ReactNode;
@@ -14,7 +15,7 @@ export const PrimaryButton = ({ children, onPress, disabled = false, style }: Pr
     onPress={onPress}
     disabled={disabled}
   >
-    <Text style={styles.text}>{children}</Text>
+    <Typography variant="body" style={styles.text}>{children}</Typography>
   </TouchableOpacity>
 );
 

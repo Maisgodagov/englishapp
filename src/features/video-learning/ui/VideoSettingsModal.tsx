@@ -1,15 +1,15 @@
-import { useCallback } from 'react';
+import { useCallback, useMemo } from 'react';
 import {
   Modal,
   StyleSheet,
   TouchableOpacity,
   View,
   ScrollView,
-  Dimensions,
 } from 'react-native';
 import Slider from '@react-native-community/slider';
 import { useTheme } from 'styled-components/native';
 import { Ionicons } from '@expo/vector-icons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Typography } from '@shared/ui';
 import { useAppDispatch, useAppSelector } from '@core/store/hooks';
@@ -31,8 +31,7 @@ import {
   selectGlobalVolume,
   selectAutoNormalize,
 } from '../model/volumeSettingsSlice';
-
-const SCREEN_HEIGHT = Dimensions.get('window').height;
+import { getContentHeight } from '@shared/utils/dimensions';
 
 interface VideoSettingsModalProps {
   visible: boolean;
@@ -63,12 +62,19 @@ const EXERCISE_COUNT_OPTIONS: { value: ExerciseCount; label: string }[] = [
 export const VideoSettingsModal = ({ visible, onClose }: VideoSettingsModalProps) => {
   const theme = useTheme() as any;
   const dispatch = useAppDispatch();
+  const insets = useSafeAreaInsets();
   const currentViewMode = useAppSelector(selectViewMode);
   const currentExerciseCount = useAppSelector(selectExerciseCount);
   const showEnglishSubtitles = useAppSelector(selectShowEnglishSubtitles);
   const showRussianSubtitles = useAppSelector(selectShowRussianSubtitles);
   const globalVolume = useAppSelector(selectGlobalVolume);
   const autoNormalize = useAppSelector(selectAutoNormalize);
+
+  // Calculate content height excluding safe areas
+  const SCREEN_HEIGHT = useMemo(
+    () => getContentHeight(insets.top, insets.bottom),
+    [insets.top, insets.bottom]
+  );
 
   const handleViewModeChange = useCallback(
     (mode: ViewMode) => {
@@ -105,19 +111,23 @@ export const VideoSettingsModal = ({ visible, onClose }: VideoSettingsModalProps
 
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-      <View style={styles.overlay}>
-        <TouchableOpacity style={styles.backdrop} activeOpacity={1} onPress={onClose} />
-        <View style={[styles.modalContent, { backgroundColor: theme.colors.background }]}>
-          {/* Header */}
-          <View style={styles.header}>
+      <TouchableOpacity style={styles.overlay} activeOpacity={1} onPress={onClose}>
+        <TouchableOpacity activeOpacity={1} onPress={(e) => e.stopPropagation()}>
+          <View style={[styles.modalContent, {
+            backgroundColor: theme.colors.background,
+            minHeight: SCREEN_HEIGHT * 0.6,
+            maxHeight: SCREEN_HEIGHT * 0.85,
+          }]}>
+            {/* Header - Compact */}
+            <View style={styles.header}>
             <View style={styles.headerLeft}>
-              <Ionicons name="settings-outline" size={28} color={theme.colors.text} />
-              <Typography variant="title" style={styles.title}>
-                Настройки просмотра
+              <Ionicons name="settings-outline" size={22} color={theme.colors.text} />
+              <Typography variant="subtitle" style={styles.title}>
+                Настройки
               </Typography>
             </View>
             <TouchableOpacity onPress={onClose} style={styles.closeButton} activeOpacity={0.7}>
-              <Ionicons name="close" size={28} color={theme.colors.text} />
+              <Ionicons name="close" size={24} color={theme.colors.text} />
             </TouchableOpacity>
           </View>
 
@@ -126,9 +136,9 @@ export const VideoSettingsModal = ({ visible, onClose }: VideoSettingsModalProps
             contentContainerStyle={styles.scrollContent}
             showsVerticalScrollIndicator={false}
           >
-            {/* View Mode Section */}
+            {/* View Mode Section - Compact */}
             <View style={styles.section}>
-              <Typography variant="subtitle" style={styles.sectionTitle}>
+              <Typography variant="body" style={styles.sectionTitle}>
                 Режим просмотра
               </Typography>
               <View style={styles.optionsContainer}>
@@ -160,7 +170,7 @@ export const VideoSettingsModal = ({ visible, onClose }: VideoSettingsModalProps
                         {isSelected && (
                           <Ionicons
                             name="checkmark-circle"
-                            size={24}
+                            size={20}
                             color={theme.colors.primary}
                           />
                         )}
@@ -174,11 +184,8 @@ export const VideoSettingsModal = ({ visible, onClose }: VideoSettingsModalProps
             {/* Exercise Count Section - Only show if with-exercises mode */}
             {currentViewMode === 'with-exercises' && (
               <View style={styles.section}>
-                <Typography variant="subtitle" style={styles.sectionTitle}>
+                <Typography variant="body" style={styles.sectionTitle}>
                   Количество упражнений
-                </Typography>
-                <Typography variant="caption" style={styles.sectionDescription}>
-                  Выберите количество упражнений (максимум 5-6 на видео)
                 </Typography>
                 <View style={styles.optionsContainer}>
                   {EXERCISE_COUNT_OPTIONS.map((option) => {
@@ -214,13 +221,10 @@ export const VideoSettingsModal = ({ visible, onClose }: VideoSettingsModalProps
               </View>
             )}
 
-            {/* Volume Section */}
+            {/* Volume Section - Compact */}
             <View style={styles.section}>
-              <Typography variant="subtitle" style={styles.sectionTitle}>
-                Громкость и звук
-              </Typography>
-              <Typography variant="caption" style={styles.sectionDescription}>
-                Настройте уровень громкости и автоматическую нормализацию
+              <Typography variant="body" style={styles.sectionTitle}>
+                Громкость
               </Typography>
 
               {/* Auto Normalize Toggle */}
@@ -236,13 +240,10 @@ export const VideoSettingsModal = ({ visible, onClose }: VideoSettingsModalProps
                 activeOpacity={0.7}
               >
                 <View style={styles.toggleLeft}>
-                  <Ionicons name="volume-high" size={24} color={theme.colors.text} />
+                  <Ionicons name="volume-high" size={20} color={theme.colors.text} />
                   <View style={styles.toggleTextContainer}>
                     <Typography variant="body" style={styles.toggleLabel}>
-                      Автоматическая нормализация
-                    </Typography>
-                    <Typography variant="caption" style={styles.toggleDescription}>
-                      Выравнивание громкости между видео
+                      Авто-нормализация
                     </Typography>
                   </View>
                 </View>
@@ -306,13 +307,10 @@ export const VideoSettingsModal = ({ visible, onClose }: VideoSettingsModalProps
               </View>
             </View>
 
-            {/* Subtitles Section */}
+            {/* Subtitles Section - Compact */}
             <View style={styles.section}>
-              <Typography variant="subtitle" style={styles.sectionTitle}>
+              <Typography variant="body" style={styles.sectionTitle}>
                 Субтитры
-              </Typography>
-              <Typography variant="caption" style={styles.sectionDescription}>
-                Выберите, какие субтитры показывать во время просмотра
               </Typography>
 
               {/* English Subtitles Toggle */}
@@ -328,13 +326,10 @@ export const VideoSettingsModal = ({ visible, onClose }: VideoSettingsModalProps
                 activeOpacity={0.7}
               >
                 <View style={styles.toggleLeft}>
-                  <Ionicons name="text" size={24} color={theme.colors.text} />
+                  <Ionicons name="text" size={20} color={theme.colors.text} />
                   <View style={styles.toggleTextContainer}>
                     <Typography variant="body" style={styles.toggleLabel}>
-                      Английские субтитры
-                    </Typography>
-                    <Typography variant="caption" style={styles.toggleDescription}>
-                      Оригинальный текст видео
+                      Английские
                     </Typography>
                   </View>
                 </View>
@@ -370,13 +365,10 @@ export const VideoSettingsModal = ({ visible, onClose }: VideoSettingsModalProps
                 activeOpacity={0.7}
               >
                 <View style={styles.toggleLeft}>
-                  <Ionicons name="language" size={24} color={theme.colors.text} />
+                  <Ionicons name="language" size={20} color={theme.colors.text} />
                   <View style={styles.toggleTextContainer}>
                     <Typography variant="body" style={styles.toggleLabel}>
-                      Русские субтитры
-                    </Typography>
-                    <Typography variant="caption" style={styles.toggleDescription}>
-                      Перевод на русский язык
+                      Русские
                     </Typography>
                   </View>
                 </View>
@@ -400,20 +392,10 @@ export const VideoSettingsModal = ({ visible, onClose }: VideoSettingsModalProps
               </TouchableOpacity>
             </View>
 
-            {/* Info Section */}
-            <View style={[styles.infoCard, { backgroundColor: `${theme.colors.primary}15` }]}>
-              <Ionicons name="information-circle" size={24} color={theme.colors.primary} />
-              <View style={styles.infoText}>
-                <Typography variant="caption" style={{ color: theme.colors.text }}>
-                  {currentViewMode === 'with-exercises'
-                    ? 'После просмотра видео вам нужно будет выполнить упражнения для закрепления материала. Без их выполнения нельзя перейти к следующему видео.'
-                    : 'Вы можете свободно пролистывать видео без выполнения упражнений. Это удобно для быстрого просмотра контента.'}
-                </Typography>
-              </View>
-            </View>
           </ScrollView>
-        </View>
-      </View>
+          </View>
+        </TouchableOpacity>
+      </TouchableOpacity>
     </Modal>
   );
 };
@@ -424,11 +406,7 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0, 0, 0, 0.7)',
     justifyContent: 'flex-end',
   },
-  backdrop: {
-    flex: 1,
-  },
   modalContent: {
-    maxHeight: SCREEN_HEIGHT * 0.85,
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
     paddingBottom: 20,
@@ -437,19 +415,19 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 20,
-    paddingTop: 20,
-    paddingBottom: 16,
+    paddingHorizontal: 16,
+    paddingTop: 16,
+    paddingBottom: 12,
   },
   headerLeft: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
+    gap: 8,
     flex: 1,
   },
   title: {
-    fontSize: 24,
-    fontWeight: '700',
+    fontSize: 18,
+    fontWeight: '600',
   },
   closeButton: {
     padding: 4,
@@ -458,28 +436,28 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   scrollContent: {
-    paddingHorizontal: 20,
-    paddingBottom: 20,
+    paddingHorizontal: 16,
+    paddingBottom: 16,
   },
   section: {
-    marginBottom: 32,
+    marginBottom: 20,
   },
   sectionTitle: {
-    fontSize: 18,
+    fontSize: 15,
     fontWeight: '600',
     marginBottom: 8,
   },
   sectionDescription: {
     opacity: 0.6,
-    marginBottom: 16,
-    lineHeight: 18,
+    marginBottom: 12,
+    lineHeight: 16,
   },
   optionsContainer: {
-    gap: 12,
+    gap: 8,
   },
   option: {
-    borderRadius: 16,
-    padding: 16,
+    borderRadius: 12,
+    padding: 12,
   },
   optionContent: {
     flexDirection: 'row',
@@ -519,33 +497,32 @@ const styles = StyleSheet.create({
   infoText: {
     flex: 1,
   },
-  // Toggle styles
+  // Toggle styles - Compact
   toggleOption: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    padding: 16,
-    borderRadius: 16,
+    padding: 10,
+    borderRadius: 10,
     borderWidth: 1,
-    marginBottom: 12,
+    marginBottom: 8,
   },
   toggleLeft: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
+    gap: 10,
     flex: 1,
   },
   toggleTextContainer: {
     flex: 1,
-    gap: 4,
   },
   toggleLabel: {
-    fontSize: 16,
+    fontSize: 14,
     fontWeight: '600',
   },
   toggleDescription: {
     opacity: 0.6,
-    lineHeight: 18,
+    lineHeight: 16,
   },
   toggle: {
     width: 48,

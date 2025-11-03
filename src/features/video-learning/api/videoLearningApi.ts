@@ -12,10 +12,16 @@ export interface TranscriptChunk {
   timestamp: Timestamp;
 }
 
+export interface TranscriptWordChunk {
+  text: string;
+  timestamp: Timestamp;
+}
+
 export interface TranscriptionResult {
   fullText: string;
   text: string;
   chunks: TranscriptChunk[];
+  wordChunks: TranscriptWordChunk[];
 }
 
 export type TranslationResult = TranscriptionResult;
@@ -48,7 +54,9 @@ export interface VideoFeedItem {
   durationSeconds: number | null;
   analysis: AnalysisResult;
   status: 'NOT_STARTED' | 'WATCHED' | 'COMPLETED';
-  audioLevel?: number; // Измеренный уровень громкости видео (0-1), если доступен
+  likesCount: number;
+  isLiked: boolean;
+  audioLevel?: number; // 0-1 normalization coefficient
   createdAt: string;
 }
 
@@ -67,9 +75,31 @@ export interface VideoContent {
   translation: TranslationResult;
   analysis: AnalysisResult;
   exercises: Exercise[];
-  audioLevel?: number; // Измеренный уровень громкости видео (0-1), если доступен
+  likesCount: number;
+  isLiked: boolean;
+  audioLevel?: number; // 0-1 normalization coefficient
   createdAt: string;
   updatedAt: string;
+}
+
+export interface PhraseSnippet {
+  id: string;
+  contentId: string;
+  videoName: string;
+  videoUrl: string;
+  startSeconds: number;
+  endSeconds: number;
+  matchedText: string;
+  contextText: string;
+  phrase: string;
+  durationSeconds: number | null;
+  audioLevel?: number;
+}
+
+export interface PhraseSearchResponse {
+  phrase: string;
+  returned: number;
+  items: PhraseSnippet[];
 }
 
 export interface SubmitAnswerPayload {
@@ -85,6 +115,11 @@ export interface SubmitProgressResponse {
     completed: boolean;
   };
   nextContentId: string | null;
+}
+
+export interface UpdateLikeResponse {
+  likesCount: number;
+  isLiked: boolean;
 }
 
 const baseHeaders = (userId: string) => ({
@@ -111,11 +146,28 @@ export const videoLearningApi = {
       headers: baseHeaders(userId),
     });
   },
+  searchPhrase(phrase: string, limit?: number, userId?: string | null) {
+    const params = new URLSearchParams();
+    params.append('phrase', phrase);
+    if (limit && limit > 0) {
+      params.append('limit', limit.toString());
+    }
+    return apiFetch<PhraseSearchResponse>(`video-learning/search?${params.toString()}`, {
+      headers: userId ? baseHeaders(userId) : undefined,
+    });
+  },
   submitProgress(userId: string, contentId: string, answers: SubmitAnswerPayload[]) {
     return apiFetch<SubmitProgressResponse>(`video-learning/${contentId}/progress`, {
       method: 'POST',
       headers: baseHeaders(userId),
       body: { answers },
+    });
+  },
+  updateLike(userId: string, contentId: string, like: boolean) {
+    return apiFetch<UpdateLikeResponse>(`video-learning/${contentId}/like`, {
+      method: 'POST',
+      headers: baseHeaders(userId),
+      body: { like },
     });
   },
 };

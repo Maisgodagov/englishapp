@@ -1,7 +1,8 @@
 import type { ReactNode } from 'react';
-import { TouchableOpacity, Text, StyleSheet, ViewStyle } from 'react-native';
+import { TouchableOpacity, StyleSheet, ViewStyle } from 'react-native';
 import { useTheme } from 'styled-components/native';
 import type { AppTheme } from '@shared/theme/theme';
+import { Typography } from '../typography/Typography';
 
 export type SecondaryButtonProps = {
   children?: ReactNode;
@@ -36,7 +37,8 @@ export const SecondaryButton = ({
       onPress={onPress}
       disabled={disabled}
     >
-      <Text
+      <Typography
+        variant="body"
         style={[
           styles.text,
           { color: theme.colors.primary },
@@ -44,7 +46,7 @@ export const SecondaryButton = ({
         ]}
       >
         {children}
-      </Text>
+      </Typography>
     </TouchableOpacity>
   );
 };

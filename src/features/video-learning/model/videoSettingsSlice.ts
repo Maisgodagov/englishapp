@@ -1,4 +1,4 @@
-import { createSlice, PayloadAction } from '@reduxjs/toolkit';
+import { createSelector, createSlice, PayloadAction } from '@reduxjs/toolkit';
 import type { RootState } from '@core/store/store';
 
 export type ViewMode = 'with-exercises' | 'without-exercises';
@@ -56,4 +56,12 @@ export const selectViewMode = (state: RootState) => state.videoSettings.viewMode
 export const selectExerciseCount = (state: RootState) => state.videoSettings.exerciseCount;
 export const selectShowEnglishSubtitles = (state: RootState) => state.videoSettings.showEnglishSubtitles;
 export const selectShowRussianSubtitles = (state: RootState) => state.videoSettings.showRussianSubtitles;
-export const selectVideoSettings = (state: RootState) => state.videoSettings;
+export const selectVideoSettings = createSelector(
+  [selectViewMode, selectExerciseCount, selectShowEnglishSubtitles, selectShowRussianSubtitles],
+  (viewMode, exerciseCount, showEnglishSubtitles, showRussianSubtitles) => ({
+    viewMode,
+    exerciseCount,
+    showEnglishSubtitles,
+    showRussianSubtitles,
+  })
+);
