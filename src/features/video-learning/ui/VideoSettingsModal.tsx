@@ -20,17 +20,23 @@ import {
   selectShowRussianSubtitles,
   selectViewMode,
   selectSpeechSpeed,
+  selectShowAdultContent,
+  selectModerationFilter,
   setDifficultyLevel,
   setExerciseCount,
   setShowEnglishSubtitles,
   setShowRussianSubtitles,
   setViewMode,
   setSpeechSpeed,
+  setShowAdultContent,
+  setModerationFilter,
   type DifficultyLevel,
   type ExerciseCount,
   type ViewMode,
   type SpeechSpeed,
+  type ModerationFilter,
 } from '../model/videoSettingsSlice';
+import { selectIsAdmin } from '@entities/user/model/selectors';
 import { getContentHeight } from '@shared/utils/dimensions';
 
 interface VideoSettingsModalProps {
@@ -84,6 +90,18 @@ export const VideoSettingsModal = ({ visible, onClose }: VideoSettingsModalProps
   const showRussianSubtitles = useAppSelector(selectShowRussianSubtitles);
   const difficultyLevel = useAppSelector(selectDifficultyLevel);
   const speechSpeed = useAppSelector(selectSpeechSpeed);
+  const showAdultContent = useAppSelector(selectShowAdultContent);
+  const moderationFilter = useAppSelector(selectModerationFilter);
+  const isAdmin = useAppSelector(selectIsAdmin);
+  const moderationOptions = useMemo(
+    () =>
+      [
+        { value: 'all' as ModerationFilter, label: 'Все видео' },
+        { value: 'moderated' as ModerationFilter, label: 'Прошли модерацию' },
+        { value: 'unmoderated' as ModerationFilter, label: 'Не прошли модерацию' },
+      ] as const,
+    [],
+  );
 
   // Local state for temporary changes
   const [localViewMode, setLocalViewMode] = useState(currentViewMode);
@@ -92,6 +110,8 @@ export const VideoSettingsModal = ({ visible, onClose }: VideoSettingsModalProps
   const [localShowRussian, setLocalShowRussian] = useState(showRussianSubtitles);
   const [localDifficulty, setLocalDifficulty] = useState(difficultyLevel);
   const [localSpeechSpeed, setLocalSpeechSpeed] = useState(speechSpeed);
+  const [localShowAdult, setLocalShowAdult] = useState(showAdultContent);
+  const [localModerationFilter, setLocalModerationFilter] = useState<ModerationFilter>(moderationFilter);
 
   // Reset local state when modal opens
   const handleOpen = useCallback(() => {
@@ -101,13 +121,26 @@ export const VideoSettingsModal = ({ visible, onClose }: VideoSettingsModalProps
     setLocalShowRussian(showRussianSubtitles);
     setLocalDifficulty(difficultyLevel);
     setLocalSpeechSpeed(speechSpeed);
-  }, [currentViewMode, currentExerciseCount, showEnglishSubtitles, showRussianSubtitles, difficultyLevel, speechSpeed]);
+    setLocalShowAdult(showAdultContent);
+    setLocalModerationFilter(moderationFilter);
+  }, [
+    currentViewMode,
+    currentExerciseCount,
+    showEnglishSubtitles,
+    showRussianSubtitles,
+    difficultyLevel,
+    speechSpeed,
+    showAdultContent,
+    moderationFilter,
+  ]);
 
   // Apply all changes
   const handleApply = useCallback(() => {
     const filtersChanged =
       localDifficulty !== difficultyLevel ||
-      localSpeechSpeed !== speechSpeed;
+      localSpeechSpeed !== speechSpeed ||
+      localShowAdult !== showAdultContent ||
+      (isAdmin && localModerationFilter !== moderationFilter);
 
     // Apply all settings
     dispatch(setViewMode(localViewMode));
@@ -116,6 +149,10 @@ export const VideoSettingsModal = ({ visible, onClose }: VideoSettingsModalProps
     dispatch(setShowRussianSubtitles(localShowRussian));
     dispatch(setDifficultyLevel(localDifficulty));
     dispatch(setSpeechSpeed(localSpeechSpeed));
+    dispatch(setShowAdultContent(localShowAdult));
+    if (isAdmin) {
+      dispatch(setModerationFilter(localModerationFilter));
+    }
 
     // Refresh feed if filters changed
     if (filtersChanged) {
@@ -131,8 +168,13 @@ export const VideoSettingsModal = ({ visible, onClose }: VideoSettingsModalProps
     localShowRussian,
     localDifficulty,
     localSpeechSpeed,
+    localShowAdult,
+    localModerationFilter,
     difficultyLevel,
     speechSpeed,
+    showAdultContent,
+    moderationFilter,
+    isAdmin,
     onClose,
   ]);
 
@@ -180,6 +222,42 @@ export const VideoSettingsModal = ({ visible, onClose }: VideoSettingsModalProps
               contentContainerStyle={styles.scrollContent}
             >
               {/* Режим просмотра */}
+              {isAdmin && (
+                <View style={styles.section}>
+                  <Typography variant="subtitle" style={styles.sectionTitle}>
+                    Фильтр модерации
+                  </Typography>
+                  <View style={styles.chipRow}>
+                    {moderationOptions.map((option) => (
+                      <TouchableOpacity
+                        key={option.value}
+                        style={[
+                          styles.chip,
+                          styles.chipLarge,
+                          {
+                            backgroundColor:
+                              localModerationFilter === option.value ? theme.colors.primary : theme.colors.surface,
+                            borderColor: theme.colors.border,
+                          },
+                        ]}
+                        onPress={() => setLocalModerationFilter(option.value)}
+                        activeOpacity={0.7}
+                      >
+                        <Typography
+                          variant="body"
+                          weight="semibold"
+                          style={{
+                            color: localModerationFilter === option.value ? '#FFFFFF' : theme.colors.text,
+                          }}
+                        >
+                          {option.label}
+                        </Typography>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                </View>
+              )}
+
               <View style={styles.section}>
                 <Typography variant="subtitle" style={styles.sectionTitle}>
                   Режим просмотра
@@ -419,11 +497,50 @@ export const VideoSettingsModal = ({ visible, onClose }: VideoSettingsModalProps
                       />
                     </View>
                   </TouchableOpacity>
-                </View>
               </View>
-            </ScrollView>
+            </View>
 
-            {/* Apply Button */}
+            {/* Контент 18+ */}
+            <View style={styles.section}>
+              <Typography variant="subtitle" style={styles.sectionTitle}>
+                Контент 18+
+              </Typography>
+              <View style={styles.toggleRow}>
+                <TouchableOpacity
+                  style={[
+                    styles.toggle,
+                    {
+                      backgroundColor: theme.colors.surface,
+                      borderColor: theme.colors.border,
+                    },
+                  ]}
+                  onPress={() => setLocalShowAdult(!localShowAdult)}
+                  activeOpacity={0.7}
+                >
+                  <Typography variant="body" weight="medium">
+                    Показывать видео 18+
+                  </Typography>
+                  <View
+                    style={[
+                      styles.switch,
+                      {
+                        backgroundColor: localShowAdult ? theme.colors.primary : theme.colors.border,
+                      },
+                    ]}
+                  >
+                    <View
+                      style={[
+                        styles.switchThumb,
+                        { transform: [{ translateX: localShowAdult ? 20 : 2 }] },
+                      ]}
+                    />
+                  </View>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </ScrollView>
+
+          {/* Apply Button */}
             <View style={styles.footer}>
               <TouchableOpacity
                 style={[
@@ -450,7 +567,7 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: 'rgba(0, 0, 0, 0.5)',
     justifyContent: 'flex-end',
-  },
+  }, 
   container: {
     justifyContent: 'flex-end',
   },

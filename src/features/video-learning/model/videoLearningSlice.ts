@@ -95,7 +95,17 @@ export const fetchVideoFeed = createAsyncThunk<VideoFeedResponse, void, { state:
     const userId = requireUserId(state);
     const cefrLevels = mapDifficultyToCefrLevels(state.videoSettings.difficultyLevel);
     const speechSpeeds = mapSpeechSpeedToValues(state.videoSettings.speechSpeed);
-    return videoLearningApi.getFeed(userId, { limit: 1, cefrLevels, speechSpeeds });
+    const isAdmin = state.user.profile?.role === 'admin';
+    const moderationFilter = isAdmin ? state.videoSettings.moderationFilter : 'moderated';
+
+    return videoLearningApi.getFeed(userId, {
+      limit: 1,
+      cefrLevels,
+      speechSpeeds,
+      showAdultContent: state.videoSettings.showAdultContent,
+      moderationFilter,
+      userRole: state.user.profile?.role,
+    });
   },
 );
 
@@ -110,8 +120,17 @@ export const fetchVideoFeedWithRelaxation = createAsyncThunk<
     const userId = requireUserId(state);
     const cefrLevels = mapDifficultyToCefrLevels(state.videoSettings.difficultyLevel);
     const speechSpeeds = mapSpeechSpeedToValues(state.videoSettings.speechSpeed);
+    const isAdmin = state.user.profile?.role === 'admin';
+    const moderationFilter = isAdmin ? state.videoSettings.moderationFilter : 'moderated';
 
-    const response = await videoLearningApi.getFeed(userId, { limit: 1, cefrLevels, speechSpeeds });
+    const response = await videoLearningApi.getFeed(userId, {
+      limit: 1,
+      cefrLevels,
+      speechSpeeds,
+      showAdultContent: state.videoSettings.showAdultContent,
+      moderationFilter,
+      userRole: state.user.profile?.role,
+    });
 
     // If we got videos, return success
     if (response.items.length > 0) {
@@ -143,6 +162,9 @@ export const fetchVideoFeedWithRelaxation = createAsyncThunk<
       limit: 1,
       cefrLevels: relaxedCefrLevels,
       speechSpeeds: relaxedSpeechSpeeds,
+      showAdultContent: state.videoSettings.showAdultContent,
+      moderationFilter,
+      userRole: state.user.profile?.role,
     });
 
     // If still no videos, try one more time with further relaxation
@@ -171,6 +193,8 @@ export const loadMoreVideoFeed = createAsyncThunk<
 
     const cefrLevels = mapDifficultyToCefrLevels(state.videoSettings.difficultyLevel);
     const speechSpeeds = mapSpeechSpeedToValues(state.videoSettings.speechSpeed);
+    const isAdmin = state.user.profile?.role === 'admin';
+    const moderationFilter = isAdmin ? state.videoSettings.moderationFilter : 'moderated';
 
     // Try to load more with cursor if available and hasMore is true
     if (cursor && hasMoreFeed) {
@@ -179,6 +203,9 @@ export const loadMoreVideoFeed = createAsyncThunk<
         cursor: cursor ?? undefined,
         cefrLevels,
         speechSpeeds,
+        showAdultContent: state.videoSettings.showAdultContent,
+        moderationFilter,
+        userRole: state.user.profile?.role,
       });
 
       // If we got videos, return success
@@ -219,6 +246,9 @@ export const loadMoreVideoFeed = createAsyncThunk<
       limit: 2,
       cefrLevels: relaxedCefrLevels,
       speechSpeeds: relaxedSpeechSpeeds,
+      showAdultContent: state.videoSettings.showAdultContent,
+      moderationFilter,
+      userRole: state.user.profile?.role,
     });
 
     // If still no videos, try one more time with further relaxation
@@ -240,8 +270,9 @@ export const loadVideoContent = createAsyncThunk<VideoContent, string | undefine
     const userId = requireUserId(state);
 
     // If contentId is explicitly provided, use it (e.g., when clicking "Next video")
+    const userRole = state.user.profile?.role ?? null;
     if (contentId) {
-      return videoLearningApi.getContent(userId, contentId);
+      return videoLearningApi.getContent(userId, contentId, userRole);
     }
 
     // Otherwise, use nextContentId from state or fall back to first feed item
@@ -249,7 +280,7 @@ export const loadVideoContent = createAsyncThunk<VideoContent, string | undefine
     if (!id) {
       throw new Error('Контент отсутствует');
     }
-    return videoLearningApi.getContent(userId, id);
+    return videoLearningApi.getContent(userId, id, userRole);
   },
   {
     condition: (contentId, { getState }) => {
@@ -523,4 +554,5 @@ export const selectLoadingContents = (state: RootState) => state.videoLearning.l
 export const selectLikesUpdating = (state: RootState) => state.videoLearning.likesUpdating;
 export const selectLikeErrors = (state: RootState) => state.videoLearning.likeErrors;
 export const selectFilterRelaxationMessage = (state: RootState) => state.videoLearning.filterRelaxationMessage;
+
 

@@ -5,6 +5,7 @@ export type ViewMode = 'with-exercises' | 'without-exercises';
 export type ExerciseCount = 1 | 2 | 3 | 4;
 export type DifficultyLevel = 'all' | 'easy' | 'medium' | 'hard';
 export type SpeechSpeed = 'all' | 'slow' | 'normal' | 'fast';
+export type ModerationFilter = 'all' | 'moderated' | 'unmoderated';
 
 interface VideoSettingsState {
   viewMode: ViewMode;
@@ -13,6 +14,8 @@ interface VideoSettingsState {
   showRussianSubtitles: boolean;
   difficultyLevel: DifficultyLevel;
   speechSpeed: SpeechSpeed;
+  showAdultContent: boolean;
+  moderationFilter: ModerationFilter;
 }
 
 const initialState: VideoSettingsState = {
@@ -22,6 +25,8 @@ const initialState: VideoSettingsState = {
   showRussianSubtitles: true,
   difficultyLevel: 'all',
   speechSpeed: 'all',
+  showAdultContent: true,
+  moderationFilter: 'moderated',
 };
 
 const videoSettingsSlice = createSlice({
@@ -46,6 +51,12 @@ const videoSettingsSlice = createSlice({
     setSpeechSpeed(state, action: PayloadAction<SpeechSpeed>) {
       state.speechSpeed = action.payload;
     },
+    setShowAdultContent(state, action: PayloadAction<boolean>) {
+      state.showAdultContent = action.payload;
+    },
+    setModerationFilter(state, action: PayloadAction<ModerationFilter>) {
+      state.moderationFilter = action.payload;
+    },
     resetSettings(state) {
       state.viewMode = initialState.viewMode;
       state.exerciseCount = initialState.exerciseCount;
@@ -53,6 +64,8 @@ const videoSettingsSlice = createSlice({
       state.showRussianSubtitles = initialState.showRussianSubtitles;
       state.difficultyLevel = initialState.difficultyLevel;
       state.speechSpeed = initialState.speechSpeed;
+      state.showAdultContent = initialState.showAdultContent;
+      state.moderationFilter = initialState.moderationFilter;
     },
   },
 });
@@ -64,6 +77,8 @@ export const {
   setShowRussianSubtitles,
   setDifficultyLevel,
   setSpeechSpeed,
+  setShowAdultContent,
+  setModerationFilter,
   resetSettings
 } = videoSettingsSlice.actions;
 export const videoSettingsReducer = videoSettingsSlice.reducer;
@@ -74,14 +89,36 @@ export const selectShowEnglishSubtitles = (state: RootState) => state.videoSetti
 export const selectShowRussianSubtitles = (state: RootState) => state.videoSettings.showRussianSubtitles;
 export const selectDifficultyLevel = (state: RootState) => state.videoSettings.difficultyLevel;
 export const selectSpeechSpeed = (state: RootState) => state.videoSettings.speechSpeed;
+export const selectShowAdultContent = (state: RootState) => state.videoSettings.showAdultContent;
+export const selectModerationFilter = (state: RootState) => state.videoSettings.moderationFilter;
 export const selectVideoSettings = createSelector(
-  [selectViewMode, selectExerciseCount, selectShowEnglishSubtitles, selectShowRussianSubtitles, selectDifficultyLevel, selectSpeechSpeed],
-  (viewMode, exerciseCount, showEnglishSubtitles, showRussianSubtitles, difficultyLevel, speechSpeed) => ({
+  [
+    selectViewMode,
+    selectExerciseCount,
+    selectShowEnglishSubtitles,
+    selectShowRussianSubtitles,
+    selectDifficultyLevel,
+    selectSpeechSpeed,
+    selectShowAdultContent,
+    selectModerationFilter,
+  ],
+  (
     viewMode,
     exerciseCount,
     showEnglishSubtitles,
     showRussianSubtitles,
     difficultyLevel,
     speechSpeed,
+    showAdultContent,
+    moderationFilter,
+  ) => ({
+    viewMode,
+    exerciseCount,
+    showEnglishSubtitles,
+    showRussianSubtitles,
+    difficultyLevel,
+    speechSpeed,
+    showAdultContent,
+    moderationFilter,
   })
 );

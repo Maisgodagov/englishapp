@@ -36,6 +36,7 @@ import {
 import { VideoFeedItem } from "./VideoFeedItem";
 import { ExerciseOverlay } from "./ExerciseOverlay";
 import { VideoSettingsModal } from "./VideoSettingsModal";
+import { VideoModerationModal } from "./VideoModerationModal";
 import { FilterRelaxationBanner } from "./FilterRelaxationBanner";
 import type {
   VideoContent,
@@ -43,6 +44,7 @@ import type {
 } from "../api/videoLearningApi";
 import { LinearGradient } from "expo-linear-gradient";
 import { getContentHeight } from "@shared/utils/dimensions";
+import { selectIsAdmin } from "@entities/user/model/selectors";
 
 interface FeedItem {
   type: "video" | "exercises";
@@ -89,11 +91,13 @@ export const VideoFeed = ({
   const hasMoreFeed = useAppSelector(selectHasMoreFeed);
   const isLoadingMore = useAppSelector(selectIsLoadingMore);
   const filterRelaxationMessage = useAppSelector(selectFilterRelaxationMessage);
+  const isAdmin = useAppSelector(selectIsAdmin);
 
   const flatListRef = useRef<FlatList<FeedItem>>(null);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [showBlockMessage, setShowBlockMessage] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
+  const [showModeration, setShowModeration] = useState(false);
   const [activeVideoIndex, setActiveVideoIndex] = useState(0);
   const currentIndexRef = useRef(0);
   const blockMessageTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
@@ -125,12 +129,25 @@ export const VideoFeed = ({
 
   const currentItem = feedItems[currentIndex];
   const currentVideoIndex = currentItem?.index ?? 0;
+  const currentVideo = videos[currentVideoIndex] ?? null;
 
   useEffect(() => {
     if (currentItem && currentItem.index !== activeVideoIndex) {
       setActiveVideoIndex(currentItem.index);
     }
   }, [currentItem, activeVideoIndex]);
+
+  useEffect(() => {
+    if (!currentVideo) {
+      setShowModeration(false);
+    }
+  }, [currentVideo]);
+
+  useEffect(() => {
+    if (!isAdmin) {
+      setShowModeration(false);
+    }
+  }, [isAdmin]);
 
   useEffect(() => {
     if (previousViewModeRef.current === viewMode) {
@@ -530,14 +547,46 @@ export const VideoFeed = ({
   return (
     <View style={styles.container}>
       <View style={[styles.settingsButton, { top: insets.top }]}>
+        {isAdmin && currentVideo && (
+          <View style={styles.moderationAction}>
+            <TouchableOpacity
+              onPress={() => setShowModeration(true)}
+              style={styles.headerIconButton}
+              activeOpacity={0.85}
+            >
+              <Ionicons name="create-outline" size={22} color="#fff" />
+            </TouchableOpacity>
+            <Typography variant="caption" style={styles.moderationStatusText}>
+              {currentVideo.isModerated ? 'Видео прошло модерацию' : 'Видео ожидает модерации'}
+            </Typography>
+          </View>
+        )}
         <TouchableOpacity
           onPress={() => setShowSettings(true)}
-          style={styles.settingsButtonInner}
+          style={styles.headerIconButton}
           activeOpacity={0.85}
         >
           <Ionicons name="ellipsis-vertical" size={24} color="#fff" />
         </TouchableOpacity>
       </View>
+
+      {isAdmin && currentVideo && (
+        <View
+          style={[
+            styles.moderationBadge,
+            {
+              top: (insets.top ?? 0) + 56,
+              backgroundColor: currentVideo.isModerated
+                ? 'rgba(22, 163, 74, 0.8)'
+                : 'rgba(234, 179, 8, 0.85)',
+            },
+          ]}
+        >
+          <Typography variant="caption" style={styles.moderationBadgeText}>
+            {currentVideo.isModerated ? 'Видео прошло модерацию' : 'Видео ожидает модерации'}
+          </Typography>
+        </View>
+      )}
 
       <FlatList
         ref={flatListRef}
@@ -593,6 +642,14 @@ export const VideoFeed = ({
         onClose={() => setShowSettings(false)}
       />
 
+      {isAdmin && currentVideo && (
+        <VideoModerationModal
+          visible={showModeration}
+          onClose={() => setShowModeration(false)}
+          video={currentVideo}
+        />
+      )}
+
       {/* Filter relaxation banner */}
       {filterRelaxationMessage && (
         <FilterRelaxationBanner
@@ -614,12 +671,36 @@ const styles = StyleSheet.create({
   },
   settingsButton: {
     zIndex: 100,
+    flexDirection: "row",
+    alignItems: "center",
   },
-  settingsButtonInner: {
+  moderationAction: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginRight: 8,
+  },
+  headerIconButton: {
     width: 44,
     height: 44,
     alignItems: "center",
     justifyContent: "center",
+  },
+  moderationBadge: {
+    position: "absolute",
+    left: 16,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 12,
+    backgroundColor: "rgba(0, 0, 0, 0.6)",
+  },
+  moderationBadgeText: {
+    color: "#FFFFFF",
+    fontSize: 12,
+  },
+  moderationStatusText: {
+    color: "#FFFFFF",
+    fontSize: 12,
+    marginLeft: 8,
   },
   blockOverlay: {
     flex: 1,
@@ -659,3 +740,5 @@ const styles = StyleSheet.create({
     color: "rgba(255, 255, 255, 0.8)",
   },
 });
+
+

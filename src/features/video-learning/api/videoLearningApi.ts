@@ -58,6 +58,8 @@ export interface VideoFeedItem {
   isLiked: boolean;
   audioLevel?: number; // 0-1 normalization coefficient
   createdAt: string;
+  isAdultContent?: boolean;
+  isModerated?: boolean;
 }
 
 export interface VideoFeedResponse {
@@ -80,6 +82,8 @@ export interface VideoContent {
   audioLevel?: number; // 0-1 normalization coefficient
   createdAt: string;
   updatedAt: string;
+  isAdultContent?: boolean;
+  isModerated?: boolean;
 }
 
 export interface PhraseSnippet {
@@ -127,11 +131,20 @@ interface FeedOptions {
   cursor?: string | null;
   cefrLevels?: string;
   speechSpeeds?: string;
+  showAdultContent?: boolean;
+  moderationFilter?: 'all' | 'moderated' | 'unmoderated';
+  userRole?: string | null;
 }
 
-const baseHeaders = (userId: string) => ({
-  'x-user-id': userId,
-});
+const buildHeaders = (userId: string, userRole?: string | null) => {
+  const headers: Record<string, string> = {
+    'x-user-id': userId,
+  };
+  if (userRole && userRole.trim().length > 0) {
+    headers['x-user-role'] = userRole;
+  }
+  return headers;
+};
 
 export const videoLearningApi = {
   getFeed(userId: string, options: FeedOptions = {}) {
@@ -148,15 +161,21 @@ export const videoLearningApi = {
     if (options.speechSpeeds) {
       params.append('speechSpeeds', options.speechSpeeds);
     }
+    if (options.showAdultContent !== undefined) {
+      params.append('showAdultContent', options.showAdultContent ? 'true' : 'false');
+    }
+    if (options.moderationFilter) {
+      params.append('moderationFilter', options.moderationFilter);
+    }
     const query = params.toString();
     const url = query ? `video-learning/feed?${query}` : 'video-learning/feed';
     return apiFetch<VideoFeedResponse>(url, {
-      headers: baseHeaders(userId),
+      headers: buildHeaders(userId, options.userRole),
     });
   },
-  getContent(userId: string, contentId: string) {
+  getContent(userId: string, contentId: string, userRole?: string | null) {
     return apiFetch<VideoContent>(`video-learning/${contentId}`, {
-      headers: baseHeaders(userId),
+      headers: buildHeaders(userId, userRole),
     });
   },
   searchPhrase(phrase: string, limit?: number, userId?: string | null) {
@@ -166,21 +185,24 @@ export const videoLearningApi = {
       params.append('limit', limit.toString());
     }
     return apiFetch<PhraseSearchResponse>(`video-learning/search?${params.toString()}`, {
-      headers: userId ? baseHeaders(userId) : undefined,
+      headers: userId ? buildHeaders(userId) : undefined,
     });
   },
   submitProgress(userId: string, contentId: string, answers: SubmitAnswerPayload[]) {
     return apiFetch<SubmitProgressResponse>(`video-learning/${contentId}/progress`, {
       method: 'POST',
-      headers: baseHeaders(userId),
+      headers: buildHeaders(userId),
       body: { answers },
     });
   },
   updateLike(userId: string, contentId: string, like: boolean) {
     return apiFetch<UpdateLikeResponse>(`video-learning/${contentId}/like`, {
       method: 'POST',
-      headers: baseHeaders(userId),
+      headers: buildHeaders(userId),
       body: { like },
     });
   },
 };
+
+
+
