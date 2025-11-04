@@ -1,4 +1,7 @@
-import type { VideoPlayer } from 'expo-video';
+interface PlaybackStatusLike {
+  status?: string;
+  playbackRate?: number;
+}
 
 /**
  * Анализатор громкости видео на основе реального воспроизведения
@@ -64,7 +67,7 @@ export class AudioVolumeAnalyzer {
    * Этот метод вызывается после начала воспроизведения
    */
   static async analyzePlaybackPattern(
-    player: VideoPlayer | null,
+    player: PlaybackStatusLike | null,
     duration: number,
     currentVolume: number
   ): Promise<VolumeAnalysisResult> {

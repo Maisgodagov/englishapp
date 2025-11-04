@@ -1,5 +1,9 @@
-import { useEffect, useRef } from "react";
-import type { VideoPlayer } from "expo-video";
+import { useCallback, useEffect, useMemo, useRef } from "react";
+import type {
+  OnBandwidthUpdateData,
+  OnLoadData,
+  OnProgressData,
+} from "react-native-video";
 
 import { addVideoDataUsage } from "./videoDataUsageStore";
 
@@ -17,18 +21,24 @@ const pickBitrate = (bitrate: NullableBitrate, fallback: number) => {
   return fallback;
 };
 
-export const useVideoDataUsageTracker = (
-  player: VideoPlayer | null,
-  { enabled, contentId }: TrackerOptions
-) => {
+interface VideoDataUsageHandlers {
+  handleLoad: (data: OnLoadData) => void;
+  handleProgress: (data: OnProgressData) => void;
+  handleBandwidthUpdate: (data: OnBandwidthUpdateData) => void;
+}
+
+export const useVideoDataUsageTracker = ({
+  enabled,
+  contentId,
+}: TrackerOptions): VideoDataUsageHandlers => {
   const statsRef = useRef({
     lastBufferedSeconds: 0,
     videoBitrate: 0,
     audioBitrate: 0,
   });
 
-  // Reset per content
   useEffect(() => {
+    console.log(`[DataUsageTracker] 🆕 New content: ${contentId.slice(0, 8)}, resetting stats`);
     statsRef.current = {
       lastBufferedSeconds: 0,
       videoBitrate: 0,
@@ -36,31 +46,34 @@ export const useVideoDataUsageTracker = (
     };
   }, [contentId]);
 
-  // Reset when tracking disabled
   useEffect(() => {
     if (!enabled) {
+      console.log(`[DataUsageTracker] ⏸️ Tracking disabled for ${contentId.slice(0, 8)}`);
       statsRef.current.lastBufferedSeconds = 0;
+    } else {
+      console.log(`[DataUsageTracker] ▶️ Tracking enabled for ${contentId.slice(0, 8)}`);
     }
-  }, [enabled]);
+  }, [enabled, contentId]);
 
-  useEffect(() => {
-    if (!player || !enabled) {
-      return;
-    }
+  const accumulate = useCallback(
+    (bufferedSeconds?: number) => {
+      if (!enabled) {
+        return;
+      }
 
-    const stats = statsRef.current;
-
-    const accumulate = (bufferedSeconds: number | undefined) => {
-      if (!Number.isFinite(bufferedSeconds) || bufferedSeconds === undefined) {
+      if (
+        bufferedSeconds === undefined ||
+        Number.isNaN(bufferedSeconds) ||
+        !Number.isFinite(bufferedSeconds)
+      ) {
         return;
       }
 
       const safeBuffered = Math.max(bufferedSeconds, 0);
-      const previous = stats.lastBufferedSeconds;
+      const previous = statsRef.current.lastBufferedSeconds;
 
       if (safeBuffered < previous) {
-        // Buffer was flushed (seek backwards). Reset baseline.
-        stats.lastBufferedSeconds = safeBuffered;
+        statsRef.current.lastBufferedSeconds = safeBuffered;
         return;
       }
 
@@ -70,101 +83,138 @@ export const useVideoDataUsageTracker = (
       }
 
       const combinedBitrate =
-        Math.max(stats.videoBitrate, 0) + Math.max(stats.audioBitrate, 0);
+        Math.max(statsRef.current.videoBitrate, 0) +
+        Math.max(statsRef.current.audioBitrate, 0);
+
       if (combinedBitrate <= 0) {
-        stats.lastBufferedSeconds = safeBuffered;
+        statsRef.current.lastBufferedSeconds = safeBuffered;
         return;
       }
 
       const bytes = (deltaSeconds * combinedBitrate) / 8;
       addVideoDataUsage(bytes);
-      stats.lastBufferedSeconds = safeBuffered;
-    };
+      console.log(`[DataUsageTracker] 📊 Accumulated: ${(bytes / 1024).toFixed(1)} KB (total now: ${((bytes + (statsRef.current.lastBufferedSeconds * combinedBitrate / 8)) / (1024 * 1024)).toFixed(2)} MB)`);
+      statsRef.current.lastBufferedSeconds = safeBuffered;
+    },
+    [enabled]
+  );
 
-    const handleTimeUpdate = ({
-      bufferedPosition,
-      currentTime,
-    }: {
-      bufferedPosition?: number;
-      currentTime?: number;
-    }) => {
-      const candidate = Math.max(
-        bufferedPosition ?? 0,
-        currentTime ?? 0,
-        stats.lastBufferedSeconds
-      );
-      accumulate(candidate);
-    };
-
-    const handleVideoTrackChange = ({
-      videoTrack,
-    }: {
-      videoTrack: { bitrate: number | null } | null;
-    }) => {
-      stats.videoBitrate = pickBitrate(videoTrack?.bitrate, stats.videoBitrate);
-    };
-
-    const handleAudioTrackChange = ({
-      audioTrack,
-    }: {
-      audioTrack: { bitrate: number | null } | null;
-    }) => {
-      stats.audioBitrate = pickBitrate(audioTrack?.bitrate, stats.audioBitrate);
-    };
-
-    const handleSourceLoad = ({
-      availableVideoTracks,
-      availableAudioTracks,
-    }: {
-      availableVideoTracks?: Array<{ bitrate: number | null }>;
-      availableAudioTracks?: Array<{ bitrate: number | null }>;
-    }) => {
-      const firstVideo =
-        availableVideoTracks?.find(
-          (track) => track.bitrate && track.bitrate > 0
-        ) ?? availableVideoTracks?.[0];
-
-      const firstAudio =
-        availableAudioTracks?.find(
-          (track) => track.bitrate && track.bitrate > 0
-        ) ?? availableAudioTracks?.[0];
-
-      stats.videoBitrate = pickBitrate(
-        firstVideo?.bitrate,
-        stats.videoBitrate
-      );
-      stats.audioBitrate = pickBitrate(
-        firstAudio?.bitrate,
-        stats.audioBitrate
-      );
-    };
-
-    // Set shorter update interval for finer granularity
-    player.timeUpdateEventInterval = Math.min(
-      player.timeUpdateEventInterval || 0.5,
-      0.5
-    );
-
-    const subs = [
-      player.addListener("timeUpdate", handleTimeUpdate),
-      player.addListener("videoTrackChange", handleVideoTrackChange),
-      player.addListener("audioTrackChange", handleAudioTrackChange),
-      player.addListener("sourceLoad", handleSourceLoad),
-    ];
-
-    // If buffered data already present (e.g., autoplay), account for it
-    try {
-      const buffered = (player as unknown as { bufferedPosition?: number })
-        .bufferedPosition;
-      if (buffered && buffered > 0) {
-        accumulate(buffered);
+  const handleLoad = useCallback(
+    (data: OnLoadData) => {
+      if (!enabled) {
+        return;
       }
-    } catch {
-      // ignore
-    }
 
-    return () => {
-      subs.forEach((sub) => sub.remove());
-    };
-  }, [player, enabled, contentId]);
+      const selectedVideo =
+        data.videoTracks?.find((track) => track.selected) ??
+        data.videoTracks?.[0];
+      const selectedAudio =
+        data.audioTracks?.find((track) => track.selected) ??
+        data.audioTracks?.[0];
+
+      statsRef.current.videoBitrate = pickBitrate(
+        selectedVideo?.bitrate,
+        statsRef.current.videoBitrate
+      );
+      statsRef.current.audioBitrate = pickBitrate(
+        selectedAudio?.bitrate,
+        statsRef.current.audioBitrate
+      );
+      statsRef.current.lastBufferedSeconds = Math.max(
+        data.currentTime ?? 0,
+        statsRef.current.lastBufferedSeconds
+      );
+
+      const totalBitrateKbps = Math.floor((statsRef.current.videoBitrate + statsRef.current.audioBitrate) / 1000);
+      const estimatedMBPerMinute = (totalBitrateKbps * 60) / (8 * 1024);
+
+      console.log(`[DataUsage ${contentId.slice(0, 8)}] 🎥 Source loaded`, {
+        availableVideoTracks: data.videoTracks?.length ?? 0,
+        availableAudioTracks: data.audioTracks?.length ?? 0,
+        selectedVideoBitrateKbps: Math.floor(statsRef.current.videoBitrate / 1000),
+        selectedAudioBitrateKbps: Math.floor(statsRef.current.audioBitrate / 1000),
+        totalBitrateKbps,
+        estimatedMBPerMinute: estimatedMBPerMinute.toFixed(2),
+      });
+    },
+    [contentId, enabled]
+  );
+
+  const handleProgress = useCallback(
+    (data: OnProgressData) => {
+      if (!enabled) {
+        return;
+      }
+
+      const candidate = Math.max(
+        data.playableDuration ?? 0,
+        data.currentTime ?? 0,
+        statsRef.current.lastBufferedSeconds
+      );
+
+      const previous = statsRef.current.lastBufferedSeconds;
+      const candidateFloor = Math.floor(candidate);
+      if (
+        candidateFloor % 3 === 0 &&
+        candidateFloor !== Math.floor(previous)
+      ) {
+        const combinedBitrate =
+          Math.max(statsRef.current.videoBitrate, 0) +
+          Math.max(statsRef.current.audioBitrate, 0);
+        const deltaSeconds = candidate - previous;
+        const deltaBytes = (deltaSeconds * combinedBitrate) / 8;
+
+        const totalKbps = Math.floor((statsRef.current.videoBitrate + statsRef.current.audioBitrate) / 1000);
+        console.log(`[DataUsage ${contentId.slice(0, 8)}] 📦 Buffer update`, {
+          bufferedSeconds: Math.floor(candidate),
+          currentTime: Math.floor(data.currentTime ?? 0),
+          playableDuration: Math.floor(data.playableDuration ?? 0),
+          videoBitrateKbps: Math.floor(statsRef.current.videoBitrate / 1000),
+          audioBitrateKbps: Math.floor(statsRef.current.audioBitrate / 1000),
+          totalKbps,
+          deltaSeconds: deltaSeconds.toFixed(1),
+          deltaKiloBytes: Math.floor(deltaBytes / 1024),
+          bufferAheadSeconds: Math.floor(candidate - (data.currentTime ?? 0)),
+        });
+      }
+
+      accumulate(candidate);
+    },
+    [accumulate, contentId, enabled]
+  );
+
+  const handleBandwidthUpdate = useCallback(
+    (data: OnBandwidthUpdateData) => {
+      if (!enabled) {
+        return;
+      }
+
+      const oldBitrate = statsRef.current.videoBitrate;
+      statsRef.current.videoBitrate = pickBitrate(
+        data.bitrate,
+        statsRef.current.videoBitrate
+      );
+
+      const qualityChange = statsRef.current.videoBitrate > oldBitrate ? '⬆️ UPGRADED' : '⬇️ DOWNGRADED';
+      console.log(`[DataUsage ${contentId.slice(0, 8)}] 🔄 Bandwidth update ${qualityChange}`, {
+        oldBitrateKbps: Math.floor(oldBitrate / 1000),
+        newBitrateKbps: Math.floor(statsRef.current.videoBitrate / 1000),
+        resolution: data.width && data.height ? `${data.width}x${data.height}` : 'unknown',
+        trackId: data.trackId ?? null,
+        changePercent: oldBitrate > 0 ? `${(((statsRef.current.videoBitrate - oldBitrate) / oldBitrate) * 100).toFixed(1)}%` : 'N/A',
+      });
+    },
+    [contentId, enabled]
+  );
+
+  // CRITICAL: Memoize the returned object to prevent recreating it on every render
+  // This prevents all components using these handlers from re-creating their useCallback dependencies
+  return useMemo(
+    () => ({
+      handleLoad,
+      handleProgress,
+      handleBandwidthUpdate,
+    }),
+    [handleLoad, handleProgress, handleBandwidthUpdate]
+  );
 };

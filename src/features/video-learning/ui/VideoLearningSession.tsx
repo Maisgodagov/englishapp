@@ -9,7 +9,7 @@ import {
   type NativeScrollEvent,
   type NativeSyntheticEvent,
 } from 'react-native';
-import { VideoView, useVideoPlayer } from 'expo-video';
+import Video, { OnLoadData, OnProgressData, OnBandwidthUpdateData } from 'react-native-video';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useTheme } from 'styled-components/native';
 import { Ionicons } from '@expo/vector-icons';
@@ -19,6 +19,7 @@ import { Typography } from '@shared/ui';
 import { PrimaryButton } from '@shared/ui/button/PrimaryButton';
 import type { SubmitAnswerPayload, VideoContent } from '../api/videoLearningApi';
 import { SCREEN_WIDTH, getContentHeight } from '@shared/utils/dimensions';
+import { useVideoDataUsageTracker } from '../model/videoDataUsageTracker';
 const WRONG_FEEDBACK_DELAY = 2000;
 const CORRECT_FEEDBACK_DELAY = 800;
 
@@ -42,22 +43,19 @@ export const VideoLearningSession = ({
   const scrollRef = useRef<ScrollView | null>(null);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
   const fadeAnim = useRef(new Animated.Value(1)).current;
+  const videoRef = useRef<Video>(null);
 
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
 
-  // Create video player using expo-video
-  // Explicitly specify HLS content type for master.m3u8 playlists
-  const player = useVideoPlayer(
-    {
-      uri: content.videoUrl,
-      ...(content.videoUrl.includes('.m3u8') && { contentType: 'hls' as const }),
-    },
-    (player) => {
-      player.loop = false;
-      player.volume = 1.0;
-    }
+  const videoSource = useMemo(
+    () =>
+      content.videoUrl.includes('.m3u8')
+        ? { uri: content.videoUrl, type: 'm3u8' as const }
+        : { uri: content.videoUrl },
+    [content.videoUrl],
   );
+
   const [activeView, setActiveView] = useState<'video' | 'exercises'>('video');
   const [answers, setAnswers] = useState<Record<string, number>>({});
   const [currentExerciseIndex, setCurrentExerciseIndex] = useState(0);
@@ -72,8 +70,26 @@ export const VideoLearningSession = ({
     [insets.top, insets.bottom]
   );
 
-  const transcriptChunks = content.transcription.chunks ?? [];
-  const translationChunks = content.translation.chunks ?? [];
+  // Data usage tracker - monitors bandwidth and calculates traffic
+  const dataUsageTracker = useVideoDataUsageTracker({
+    enabled: activeView === 'video',
+    contentId: content.id,
+  });
+
+  // OPTIMIZATION: Memoize chunks arrays to prevent unnecessary re-computations in useMemo hooks
+  const transcriptChunks = useMemo(() => content.transcription.chunks ?? [], [content.transcription]);
+  const translationChunks = useMemo(() => content.translation.chunks ?? [], [content.translation]);
+
+  // OPTIMIZATION: Memoize bufferConfig to prevent Video component recreation
+  const bufferConfig = useMemo(
+    () => ({
+      minBufferMs: 2000,
+      maxBufferMs: 4000,
+      bufferForPlaybackMs: 1000,
+      bufferForPlaybackAfterRebufferMs: 1500,
+    }),
+    []
+  );
 
   // Improved subtitle synchronization with better fallback logic
   const activeChunkIndex = useMemo(() => {
@@ -116,24 +132,48 @@ export const VideoLearningSession = ({
     return translationChunks[0] ?? null;
   }, [activeChunkIndex, translationChunks]);
 
-  // Track player status with polling
-  useEffect(() => {
-    if (!player) return;
+  const handleVideoLoad = useCallback((data: OnLoadData) => {
+    console.log(`[VideoLearningSession ${content.id}] ✅ Video loaded:`, {
+      duration: Math.floor(data.duration),
+      naturalSize: data.naturalSize,
+      videoTracks: data.videoTracks?.length ?? 0,
+      audioTracks: data.audioTracks?.length ?? 0,
+    });
+    setDuration(data.duration);
+    setCurrentTime(data.currentTime ?? 0);
+    // Track data usage from load event
+    dataUsageTracker.handleLoad(data);
+  }, [content.id, dataUsageTracker]);
 
-    const interval = setInterval(() => {
-      if (player.duration && player.duration !== duration) {
-        setDuration(player.duration);
+  const handleVideoProgress = useCallback((data: OnProgressData) => {
+    setCurrentTime(data.currentTime);
+    setDuration((prev) => {
+      if (prev > 0) {
+        return prev;
       }
-      if (player.currentTime !== currentTime) {
-        setCurrentTime(player.currentTime);
+      if (Number.isFinite(data.seekableDuration) && data.seekableDuration > 0) {
+        return data.seekableDuration;
       }
-      if (player.playing !== isPlaying) {
-        setIsPlaying(player.playing);
-      }
-    }, 100);
+      return prev;
+    });
+    // Track data usage from progress updates
+    dataUsageTracker.handleProgress(data);
+  }, [dataUsageTracker]);
 
-    return () => clearInterval(interval);
-  }, [player, duration, currentTime, isPlaying]);
+  const handleVideoEnd = useCallback(() => {
+    console.log(`[VideoLearningSession ${content.id}] ⏹️ Video ended`);
+    setIsPlaying(false);
+    setShowControls(true);
+    setCurrentTime((prev) => (duration > 0 ? duration : prev));
+  }, [content.id, duration]);
+
+  const handleVideoBandwidthUpdate = useCallback((data: OnBandwidthUpdateData) => {
+    dataUsageTracker.handleBandwidthUpdate(data);
+  }, [dataUsageTracker]);
+
+  const handleVideoError = useCallback((error: any) => {
+    console.error(`[VideoLearningSession ${content.id}] ❌ Video error:`, error);
+  }, [content.id]);
 
   const clearTimer = useCallback(() => {
     if (timerRef.current) {
@@ -181,7 +221,7 @@ export const VideoLearningSession = ({
       if (nextView !== activeView) {
         setActiveView(nextView);
         if (nextView === 'exercises') {
-          player?.pause();
+          setIsPlaying(false);
         }
       }
     },
@@ -189,13 +229,9 @@ export const VideoLearningSession = ({
   );
 
   const togglePlayback = useCallback(() => {
-    if (!player) return;
-    if (isPlaying) {
-      player.pause();
-    } else {
-      player.play();
-    }
-  }, [isPlaying, player]);
+    setShowControls(true);
+    setIsPlaying((prev) => !prev);
+  }, []);
 
   const handleVideoPress = useCallback(() => {
     setShowControls((prev) => !prev);
@@ -208,6 +244,7 @@ export const VideoLearningSession = ({
 
   // Reset state when content changes
   useEffect(() => {
+    console.log(`[VideoLearningSession ${content.id}] 🔄 Content changed - resetting state`);
     setActiveView('video');
     setAnswers({});
     setCurrentExerciseIndex(0);
@@ -217,18 +254,19 @@ export const VideoLearningSession = ({
     setDuration(0);
     clearTimer();
     scrollRef.current?.scrollTo({ y: 0, animated: false });
-    if (player) {
-      player.currentTime = 0;
-      player.play();
-    }
-  }, [content.id, clearTimer, player]);
+    videoRef.current?.seek(0);
+    setIsPlaying(true);
+  }, [content.id, clearTimer]);
 
   // Auto play when returning to video view
   useEffect(() => {
-    if (activeView === 'video' && player) {
-      player.play();
+    console.log(`[VideoLearningSession ${content.id}] 👁️ View changed to: ${activeView}, playing: ${activeView === 'video'}`);
+    if (activeView === 'video') {
+      setIsPlaying(true);
+    } else {
+      setIsPlaying(false);
     }
-  }, [activeView, player]);
+  }, [activeView, content.id]);
 
   // Fade in when content changes
   useEffect(() => {
@@ -265,11 +303,25 @@ export const VideoLearningSession = ({
       >
         {/* VIDEO VIEW */}
         <Pressable style={[styles.videoPage, { height: SCREEN_HEIGHT }]} onPress={handleVideoPress}>
-          <VideoView
-            player={player}
+          <Video
+            ref={videoRef}
+            source={videoSource}
             style={styles.video}
-            contentFit="cover"
-            nativeControls={false}
+            resizeMode="cover"
+            repeat={false}
+            paused={!isPlaying || activeView !== 'video'}
+            volume={1}
+            muted={false}
+            playInBackground={false}
+            playWhenInactive={false}
+            preventsDisplaySleepDuringVideoPlayback={true}
+            maxBitRate={2000000}  // Limit to 2 Mbps (~720p) to save bandwidth
+            bufferConfig={bufferConfig}  // OPTIMIZATION: Use memoized config
+            onLoad={handleVideoLoad}
+            onProgress={handleVideoProgress}
+            onBandwidthUpdate={handleVideoBandwidthUpdate}  // OPTIMIZATION: Use memoized handler
+            onError={handleVideoError}  // OPTIMIZATION: Use memoized handler
+            onEnd={handleVideoEnd}
           />
 
           {/* Top gradient overlay */}

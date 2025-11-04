@@ -444,20 +444,17 @@ const videoLearningSlice = createSlice({
           };
         }
 
+        // Use direct mutation instead of spread to preserve VideoContent object reference
+        // This prevents VideoFeedItem from re-rendering and recreating video player
         if (state.loadedContents[contentId]) {
-          state.loadedContents[contentId] = {
-            ...state.loadedContents[contentId],
-            likesCount,
-            isLiked,
-          };
+          state.loadedContents[contentId].likesCount = likesCount;
+          state.loadedContents[contentId].isLiked = isLiked;
         }
 
+        // Use direct mutation to preserve object reference
         if (state.content?.id === contentId) {
-          state.content = {
-            ...state.content,
-            likesCount,
-            isLiked,
-          };
+          state.content.likesCount = likesCount;
+          state.content.isLiked = isLiked;
         }
       })
       .addCase(updateVideoLike.rejected, (state, action) => {

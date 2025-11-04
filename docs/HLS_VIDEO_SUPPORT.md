@@ -44,25 +44,35 @@ https://<cdn>/videos/<safeBaseName>/master.m3u8
 
 ### Библиотека
 
-Используется `expo-video` (версия 3.0.12+), которая нативно поддерживает HLS на всех платформах:
+Используется `react-native-video` (версия 6.17.0), которая нативно поддерживает HLS на всех платформах:
 - **iOS**: AVPlayer (нативная поддержка HLS)
 - **Android**: ExoPlayer (нативная поддержка HLS)
 - **Web**: HLS.js или нативная поддержка в браузере
 
 ### Использование
 
-Для правильной работы HLS необходимо явно указывать `contentType: 'hls'`:
+Для правильной работы HLS используется компонент `Video` из `react-native-video` с явным указанием типа потока:
 
 ```typescript
-const player = useVideoPlayer(
-  {
-    uri: content.videoUrl,
-    ...(content.videoUrl.includes('.m3u8') && { contentType: 'hls' as const }),
-  },
-  (player) => {
-    player.loop = true;
-    player.volume = 1.0;
-  }
+const videoSource = useMemo(
+  () =>
+    content.videoUrl.includes('.m3u8')
+      ? { uri: content.videoUrl, type: 'm3u8' as const }
+      : { uri: content.videoUrl },
+  [content.videoUrl],
+);
+
+return (
+  <Video
+    source={videoSource}
+    resizeMode="cover"
+    bufferConfig={{
+      minBufferMs: 1000,
+      maxBufferMs: 8000,
+      bufferForPlaybackMs: 1000,
+      bufferForPlaybackAfterRebufferMs: 2000,
+    }}
+  />
 );
 ```
 
@@ -128,6 +138,6 @@ https://cdn.example.com/videos/abc123-def456/master.m3u8
 
 ## Полезные ссылки
 
-- [expo-video документация](https://docs.expo.dev/versions/latest/sdk/video/)
+- [react-native-video документация](https://docs.thewidlarzgroup.com/react-native-video/)
 - [HLS спецификация](https://developer.apple.com/documentation/http-live-streaming)
 - [Adaptive Bitrate Streaming](https://en.wikipedia.org/wiki/Adaptive_bitrate_streaming)

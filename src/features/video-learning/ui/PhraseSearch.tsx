@@ -1,7 +1,6 @@
 import React, { useState, useRef } from 'react';
 import {
   ActivityIndicator,
-  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -9,7 +8,7 @@ import {
   Pressable,
 } from 'react-native';
 import { useTheme } from 'styled-components/native';
-import { VideoView, useVideoPlayer } from 'expo-video';
+import Video, { OnLoadData, OnProgressData } from 'react-native-video';
 import Carousel from 'react-native-reanimated-carousel';
 
 import { useAppSelector } from '@core/store/hooks';
@@ -38,107 +37,100 @@ interface VideoCardProps {
 const VideoCard = React.memo(({ snippet, phrase, theme, isActive }: VideoCardProps) => {
   const [isPlaying, setIsPlaying] = React.useState(false);
   const [isReady, setIsReady] = React.useState(false);
+  const videoRef = React.useRef<Video>(null);
   const isPlayingRef = React.useRef(false);
 
-  const startSeconds = snippet.startSeconds;
-  const endSeconds = snippet.endSeconds;
-
+  // No need to extract these - use snippet properties directly to avoid unnecessary dependencies
   const shouldLoad = isActive;
-  const videoSource = React.useMemo(() => {
-    if (!shouldLoad) {
-      return null;
-    }
 
-    if (snippet.videoUrl.includes('.m3u8')) {
-      return {
-        uri: snippet.videoUrl,
-        contentType: 'hls' as const,
-      };
-    }
-
-    return { uri: snippet.videoUrl };
-  }, [shouldLoad, snippet.videoUrl]);
-
-  // Create video player
-  // Explicitly specify HLS content type for master.m3u8 playlists
-  const player = useVideoPlayer(
-    videoSource,
-    (player) => {
-      player.loop = false;
-      player.volume = 1.0;
-      player.timeUpdateEventInterval = 0.5;
-    }
-  );
-
-  // Track player status
-  React.useEffect(() => {
-    if (!player) return;
-
-    const interval = setInterval(() => {
-      if (player.playing !== isPlaying) {
-        setIsPlaying(player.playing);
-        isPlayingRef.current = player.playing;
-      }
-
-      // Check if we've reached the end of the snippet
-      if (player.currentTime >= endSeconds && isPlayingRef.current) {
-        player.pause();
-        setIsPlaying(false);
-        isPlayingRef.current = false;
-      }
-
-      // Set ready state when video has duration
-      if (player.duration > 0 && !isReady) {
-        setIsReady(true);
-      }
-    }, 100);
-
-    return () => clearInterval(interval);
-  }, [player, isPlaying, isReady, endSeconds]);
-
-  // Auto play/pause based on active state
-  React.useEffect(() => {
-    if (!player || !isReady) return;
-
-    if (isActive && !isPlaying) {
-      player.currentTime = startSeconds;
-      player.play();
-    } else if (!isActive && isPlaying) {
-      player.pause();
-    }
-  }, [isActive, isReady, isPlaying, player, startSeconds]);
-
-  React.useEffect(() => {
-    if (!shouldLoad) {
-      if (player) {
-        try {
-          player.pause();
-        } catch {
-          // ignore
-        }
-      }
-      setIsPlaying(false);
-      setIsReady(false);
-      isPlayingRef.current = false;
-    }
-  }, [shouldLoad, player]);
-
-  useVideoDataUsageTracker(player, {
+  const dataUsageTracker = useVideoDataUsageTracker({
     enabled: shouldLoad,
     contentId: snippet.id,
   });
 
-  const handlePlayPause = () => {
-    if (!player || !isReady || !isActive) {
+  // OPTIMIZATION: Memoize video source to prevent recreation
+  const videoSource = React.useMemo(
+    () => snippet.videoUrl.includes('.m3u8')
+      ? { uri: snippet.videoUrl, type: 'm3u8' as const }
+      : { uri: snippet.videoUrl },
+    [snippet.videoUrl]
+  );
+
+  // OPTIMIZATION: Memoize bufferConfig to prevent Video component recreation
+  const bufferConfig = React.useMemo(
+    () => ({
+      minBufferMs: 2000,
+      maxBufferMs: 3000,  // Even smaller for short snippets
+      bufferForPlaybackMs: 1000,
+      bufferForPlaybackAfterRebufferMs: 1500,
+    }),
+    []
+  );
+
+  const handleLoad = React.useCallback(
+    (data: OnLoadData) => {
+      console.log(`[PhraseSearch ${snippet.id}] ✅ Video loaded:`, {
+        duration: Math.floor(data.duration),
+        startSeconds: snippet.startSeconds,
+        endSeconds: snippet.endSeconds,
+      });
+      dataUsageTracker.handleLoad(data);
+      setIsReady(true);
+    },
+    [dataUsageTracker, snippet.id, snippet.startSeconds, snippet.endSeconds]
+  );
+
+  const handleProgress = React.useCallback(
+    (data: OnProgressData) => {
+      dataUsageTracker.handleProgress(data);
+
+      if (data.currentTime >= snippet.endSeconds && isPlayingRef.current) {
+        console.log(`[PhraseSearch ${snippet.id}] ⏹️ Reached end of snippet`);
+        setIsPlaying(false);
+        isPlayingRef.current = false;
+      }
+    },
+    [dataUsageTracker, snippet.endSeconds, snippet.id]
+  );
+
+  const handleError = React.useCallback((error: any) => {
+    console.error(`[PhraseSearch ${snippet.id}] ❌ Video error:`, error);
+  }, [snippet.id]);
+
+  React.useEffect(() => {
+    if (!isReady) {
       return;
     }
 
-    if (isPlaying) {
-      player.pause();
+    if (isActive) {
+      videoRef.current?.seek(snippet.startSeconds);
+      setIsPlaying(true);
+      isPlayingRef.current = true;
     } else {
-      player.play();
+      setIsPlaying(false);
+      isPlayingRef.current = false;
     }
-  };
+  }, [isActive, isReady, snippet.startSeconds]);
+
+  React.useEffect(() => {
+    if (!shouldLoad) {
+      setIsPlaying(false);
+      setIsReady(false);
+      isPlayingRef.current = false;
+    }
+  }, [shouldLoad]);
+
+  const handlePlayPause = React.useCallback(() => {
+    if (!isReady || !isActive) {
+      return;
+    }
+
+    setIsPlaying((prev) => {
+      const next = !prev;
+      isPlayingRef.current = next;
+      return next;
+    });
+  }, [isActive, isReady]);
 
   const highlightPhrase = (text: string) => {
     if (!phrase || !text) return <Text style={styles.subtitleText}>{text}</Text>;
@@ -175,12 +167,25 @@ const VideoCard = React.memo(({ snippet, phrase, theme, isActive }: VideoCardPro
     <View style={styles.videoCard}>
       <View style={styles.videoWrapper}>
         <Pressable onPress={handlePlayPause} style={styles.videoContainer}>
-          {player ? (
-            <VideoView
-              player={player}
+          {shouldLoad ? (
+            <Video
+              ref={videoRef}
+              source={videoSource}  // OPTIMIZATION: Use memoized source
               style={styles.video}
-              contentFit="cover"
-              nativeControls={false}
+              resizeMode="cover"
+              repeat={false}
+              paused={!isPlaying || !isActive}
+              volume={1}
+              muted={false}
+              playInBackground={false}
+              playWhenInactive={false}
+              preventsDisplaySleepDuringVideoPlayback={true}
+              maxBitRate={2000000}  // Limit to 2 Mbps (~720p) to save bandwidth
+              bufferConfig={bufferConfig}  // OPTIMIZATION: Use memoized config
+              onLoad={handleLoad}
+              onProgress={handleProgress}
+              onBandwidthUpdate={dataUsageTracker.handleBandwidthUpdate}
+              onError={handleError}  // OPTIMIZATION: Use memoized handler
             />
           ) : (
             <View style={[styles.video, { backgroundColor: '#000' }]} />
@@ -229,6 +234,8 @@ const VideoCard = React.memo(({ snippet, phrase, theme, isActive }: VideoCardPro
     </View>
   );
 });
+
+VideoCard.displayName = 'VideoCard';
 
 export const PhraseSearch = () => {
   const theme = useTheme() as AppTheme;

@@ -133,9 +133,14 @@ export const VideoFeed = ({
 
   useEffect(() => {
     if (currentItem && currentItem.index !== activeVideoIndex) {
+      console.log(`[VideoFeed] 📍 Active video changed: ${activeVideoIndex} → ${currentItem.index}`, {
+        currentIndex,
+        feedItemType: currentItem.type,
+        videoId: currentItem.content.id.slice(0, 8),
+      });
       setActiveVideoIndex(currentItem.index);
     }
-  }, [currentItem, activeVideoIndex]);
+  }, [currentItem, activeVideoIndex, currentIndex]);
 
   useEffect(() => {
     if (!currentVideo) {
@@ -485,7 +490,7 @@ export const VideoFeed = ({
     },
     [
       currentIndex,
-      currentVideoIndex,
+      // currentVideoIndex removed - not used in renderItem
       completedVideoIds,
       handleSubmit,
       submitStatus,
@@ -598,8 +603,8 @@ export const VideoFeed = ({
         scrollEventThrottle={16}
         getItemLayout={getItemLayout}
         removeClippedSubviews={true}
-        maxToRenderPerBatch={2}
-        windowSize={5}
+        maxToRenderPerBatch={1}
+        windowSize={2}  // CRITICAL: Reduced from 3 to 2 - only render current + next video to save bandwidth
         initialNumToRender={1}
         updateCellsBatchingPeriod={50}
         ListFooterComponent={footerComponent}

@@ -10,7 +10,7 @@ import {
   PanResponder,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { VideoView, useVideoPlayer } from "expo-video";
+import Video, { OnLoadData, OnProgressData, OnBufferData, OnBandwidthUpdateData } from "react-native-video";
 import { Ionicons } from "@expo/vector-icons";
 
 import { Typography } from "@shared/ui";
@@ -174,33 +174,45 @@ const VideoFeedItemComponent = ({
   const [isSeeking, setIsSeeking] = useState(false);
   const shouldLoad = isActive && isTabFocused;
   const totalUsageBytes = useVideoDataUsage();
+  const videoRef = useRef<Video>(null);
 
-  const videoSource = useMemo(() => {
-    if (!shouldLoad) {
-      return null;
-    }
-
-    if (content.videoUrl.includes(".m3u8")) {
-      return {
-        uri: content.videoUrl,
-        contentType: "hls" as const,
-        bufferOptions: {
-          preferredForwardBufferDuration: 15000,
-          minBufferForPlayback: 1000,
-          waitsToMinimizeStalling: true,
-        },
-      };
-    }
-
-    return { uri: content.videoUrl };
-  }, [content.videoUrl, shouldLoad]);
-
-  // Create video player using expo-video
-  const player = useVideoPlayer(videoSource, (player) => {
-    player.loop = true;
-    player.volume = 1.0;
-    player.timeUpdateEventInterval = 0.5;
+  // Data usage tracker - monitors bandwidth and calculates traffic
+  const dataUsageTracker = useVideoDataUsageTracker({
+    enabled: shouldLoad,
+    contentId: content.id,
   });
+
+  // CRITICAL: Memoize video source to prevent recreation on every render
+  // Creating new object reference causes Video component to reload
+  const videoSource = useMemo(
+    () => ({ uri: content.videoUrl }),
+    [content.videoUrl]
+  );
+
+  // CRITICAL: Memoize bufferConfig to prevent Video component recreation
+  const bufferConfig = useMemo(
+    () => ({
+      minBufferMs: 2000,
+      maxBufferMs: 4000,
+      bufferForPlaybackMs: 1000,
+      bufferForPlaybackAfterRebufferMs: 1500,
+    }),
+    []
+  );
+
+  // CRITICAL: Memoize video style to prevent recreation
+  const videoStyle = useMemo(
+    () => [
+      styles.video,
+      {
+        width: SCREEN_WIDTH,
+        height: SCREEN_HEIGHT,
+      },
+    ],
+    [SCREEN_HEIGHT]
+  );
+
+  console.log(`[VideoFeedItem ${content.id}] 🎬 Render: isActive=${isActive}, shouldLoad=${shouldLoad}, tabFocused=${isTabFocused}`);
 
   const updateIsSeeking = useCallback((value: boolean) => {
     isSeekingRef.current = value;
@@ -260,26 +272,24 @@ const VideoFeedItemComponent = ({
 
   // Reset video state when content changes
   useEffect(() => {
+    console.log(`[VideoFeedItem ${content.id}] 🔄 Content changed - resetting state`);
     isSeekingRef.current = false;
     setCurrentTime(0);
     setDuration(0);
-    setIsPlaying(false);
     setIsBuffering(true);
     updateIsSeeking(false);
-  }, [content.id, updateIsSeeking]);
+    setIsPlaying(shouldLoad);
+  }, [content.id, shouldLoad, updateIsSeeking]);
 
   useEffect(() => {
+    console.log(`[VideoFeedItem ${content.id}] 👁️ shouldLoad changed: ${shouldLoad}`);
     if (shouldLoad) {
       setIsBuffering(true);
+      setIsPlaying(true);
     } else {
       setIsPlaying(false);
     }
-  }, [shouldLoad]);
-
-  useVideoDataUsageTracker(player, {
-    enabled: shouldLoad,
-    contentId: content.id,
-  });
+  }, [shouldLoad, content.id]);
 
   const formattedUsage = useMemo(() => {
     const bytes = totalUsageBytes;
@@ -298,48 +308,62 @@ const VideoFeedItemComponent = ({
     resetVideoDataUsage();
   }, []);
 
-  // Track player status with polling
-  useEffect(() => {
-    if (!player || !shouldLoad) return;
+  // CRITICAL: Memoize all video event handlers to prevent Video recreation
+  const handleVideoLoad = useCallback(
+    (data: OnLoadData) => {
+      console.log(`[VideoFeedItem ${content.id}] ✅ Video loaded:`, {
+        duration: Math.floor(data.duration),
+        naturalSize: data.naturalSize,
+        videoTracks: data.videoTracks?.length ?? 0,
+        audioTracks: data.audioTracks?.length ?? 0,
+      });
+      setDuration(data.duration);
+      setIsBuffering(false);
+      dataUsageTracker.handleLoad(data);
+    },
+    [content.id, dataUsageTracker]
+  );
 
-    const readSafe = <T>(operation: () => T, fallback: T): T => {
-      try {
-        return operation();
-      } catch {
-        return fallback;
-      }
-    };
-
-    const interval = setInterval(() => {
-      const currentDuration = readSafe(() => player.duration, duration);
-      if (currentDuration && currentDuration !== duration) {
-        setDuration(currentDuration);
-        if (isBuffering && currentDuration > 0) {
-          setIsBuffering(false);
-        }
-      }
-
+  const handleVideoProgress = useCallback(
+    (data: OnProgressData) => {
       if (!isSeekingRef.current) {
-        const nextTime = readSafe(() => player.currentTime, currentTime);
-        if (nextTime !== currentTime) {
-          setCurrentTime(nextTime);
-        }
+        setCurrentTime(data.currentTime);
       }
+      dataUsageTracker.handleProgress(data);
+    },
+    [dataUsageTracker]
+  );
 
-      const playingStatus = readSafe(() => player.playing, isPlaying);
-      if (playingStatus !== isPlaying) {
-        setIsPlaying(playingStatus);
-      }
+  const handleVideoBandwidthUpdate = useCallback(
+    (data: OnBandwidthUpdateData) => {
+      dataUsageTracker.handleBandwidthUpdate(data);
+    },
+    [dataUsageTracker]
+  );
 
-      const shouldBuffer =
-        readSafe(() => !player.duration || player.duration === 0, isBuffering);
-      if (shouldBuffer !== isBuffering) {
-        setIsBuffering(shouldBuffer);
-      }
-    }, 100); // Poll every 100ms
+  const handleVideoBuffer = useCallback(
+    (data: OnBufferData) => {
+      console.log(`[VideoFeedItem ${content.id}] 📥 Buffer ${data.isBuffering ? 'START' : 'END'}`);
+      setIsBuffering(data.isBuffering);
+    },
+    [content.id]
+  );
 
-    return () => clearInterval(interval);
-  }, [player, shouldLoad, duration, currentTime, isPlaying, isBuffering]);
+  const handleVideoError = useCallback(
+    (error: any) => {
+      console.error(`[VideoFeedItem ${content.id}] ❌ Video error:`, error);
+    },
+    [content.id]
+  );
+
+  const handlePlaybackStateChanged = useCallback(
+    (data: any) => {
+      console.log(`[VideoFeedItem ${content.id}] 🎮 Playback state:`, data.isPlaying ? 'PLAYING' : 'PAUSED');
+    },
+    [content.id]
+  );
+
+  // No polling needed - react-native-video provides callbacks
 
   useEffect(
     () => () => {
@@ -351,16 +375,7 @@ const VideoFeedItemComponent = ({
   );
 
   const togglePlayback = useCallback(() => {
-    if (!player) return;
-    try {
-      if (isPlaying) {
-        player.pause();
-      } else {
-        player.play();
-      }
-    } catch {
-      return;
-    }
+    setIsPlaying((prev) => !prev);
 
     // Show pause/play icon animation
     Animated.sequence([
@@ -376,7 +391,7 @@ const VideoFeedItemComponent = ({
         useNativeDriver: true,
       }),
     ]).start();
-  }, [isPlaying, pauseIconAnim, player]);
+  }, [pauseIconAnim]);
 
   // Single tap to pause/play
   const showDoubleTapLike = useCallback(() => {
@@ -447,12 +462,12 @@ const VideoFeedItemComponent = ({
   // Seek to position
   const seekToPosition = useCallback(
     (position: number) => {
-      if (!player || duration === 0) return;
+      if (!videoRef.current || duration === 0) return;
       const timeSeconds = Math.max(0, Math.min(position * duration, duration));
-      player.currentTime = timeSeconds;
+      videoRef.current.seek(timeSeconds);
       setCurrentTime(timeSeconds);
     },
-    [duration, player]
+    [duration]
   );
 
   // PanResponder for progress bar scrubbing
@@ -486,62 +501,8 @@ const VideoFeedItemComponent = ({
   );
 
   // Set volume
-  useEffect(() => {
-    if (!isActive || !player) {
-      return;
-    }
-
-    try {
-      player.volume = globalVolume;
-    } catch {
-      // Player might already be released - ignore
-    }
-  }, [content.id, globalVolume, isActive, player]);
-
-  // Control playback based on active state and tab focus
-  useEffect(() => {
-    if (!player) return;
-
-    const runSafe = (operation: () => void) => {
-      try {
-        operation();
-      } catch {
-        // ignore errors from released player
-      }
-    };
-
-    const play = () => runSafe(() => player.play());
-    const pause = () => runSafe(() => player.pause());
-
-    if (!shouldLoad) {
-      pause();
-      runSafe(() => {
-        player.muted = false;
-        player.volume = globalVolume;
-      });
-      return () => {
-        pause();
-      };
-    }
-
-    runSafe(() => {
-      player.loop = true;
-    });
-
-    if (isActive && isTabFocused) {
-      runSafe(() => {
-        player.muted = false;
-        player.volume = globalVolume;
-      });
-      play();
-    } else {
-      pause();
-    }
-
-    return () => {
-      pause();
-    };
-  }, [player, shouldLoad, isActive, isTabFocused, globalVolume]);
+  // Playback is now controlled directly via Video component props (paused, volume)
+  // No manual play/pause needed
 
   const levelColor = useMemo(
     () => getLevelColor(content.analysis.cefrLevel),
@@ -616,6 +577,16 @@ const VideoFeedItemComponent = ({
           >
             Трафик: {formattedUsage}
           </Typography>
+          {/* Debug info */}
+          {shouldLoad && videoRef.current && (
+            <Typography
+              variant="caption"
+              style={[styles.usageText, { fontSize: 10, marginTop: 4 }]}
+              enableWordLookup={false}
+            >
+              ID: {content.id.slice(0, 8)}
+            </Typography>
+          )}
           <TouchableOpacity
             onPress={handleResetUsage}
             style={styles.resetButton}
@@ -634,19 +605,30 @@ const VideoFeedItemComponent = ({
 
       {/* Video container with black background */}
       <View style={styles.videoContainer}>
-        {shouldLoad && player ? (
-          <VideoView
-            player={player}
-            style={[
-              styles.video,
-              {
-                width: SCREEN_WIDTH,
-                height: SCREEN_HEIGHT,
-              },
-            ]}
-            contentFit="cover"
-            nativeControls={false}
-            pointerEvents="none"
+        {shouldLoad ? (
+          <Video
+            ref={videoRef}
+            source={videoSource}
+            style={videoStyle}  // OPTIMIZATION: Use memoized style to prevent recreation
+            resizeMode="cover"
+            repeat={false}  // CRITICAL: Changed to false - repeat causes unnecessary buffer reload at video end
+            paused={!isPlaying || !isActive || !isTabFocused}
+            volume={globalVolume}
+            muted={false}
+            playInBackground={false}
+            playWhenInactive={false}
+            preventsDisplaySleepDuringVideoPlayback={true}
+            maxBitRate={2000000}  // Limit to 2 Mbps (~720p) to save bandwidth
+            onLoad={handleVideoLoad}  // OPTIMIZATION: Use memoized handler to prevent Video recreation
+            onProgress={handleVideoProgress}  // OPTIMIZATION: Use memoized handler
+            onBandwidthUpdate={handleVideoBandwidthUpdate}  // OPTIMIZATION: Use memoized handler
+            onBuffer={handleVideoBuffer}  // OPTIMIZATION: Use memoized handler
+            onError={handleVideoError}  // OPTIMIZATION: Use memoized handler
+            onPlaybackStateChanged={handlePlaybackStateChanged}  // OPTIMIZATION: Use memoized handler
+            bufferConfig={bufferConfig}  // OPTIMIZATION: Use memoized config to prevent recreation
+            progressUpdateInterval={1000}  // OPTIMIZATION: Increased from 500ms to 1000ms - reduce callback frequency
+            ignoreSilentSwitch="ignore"
+            mixWithOthers="duck"
           />
         ) : (
           <View
@@ -663,7 +645,7 @@ const VideoFeedItemComponent = ({
       </View>
 
       {/* Buffering indicator - only show when video is loading but not playing */}
-      {shouldLoad && player && isBuffering && !isPlaying && (
+      {shouldLoad && isBuffering && !isPlaying && (
         <View style={styles.bufferingContainer}>
           <View style={styles.bufferingSpinner}>
             <ActivityIndicator size="large" color="#FFFFFF" />
