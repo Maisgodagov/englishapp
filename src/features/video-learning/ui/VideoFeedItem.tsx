@@ -21,11 +21,12 @@ import {
 } from "../model/videoSettingsSlice";
 import { selectGlobalVolume } from "../model/volumeSettingsSlice";
 import type { VideoContent } from "../api/videoLearningApi";
+import { SCREEN_WIDTH, getContentHeight } from "@shared/utils/dimensions";
 import {
-  SCREEN_WIDTH,
-  WINDOW_HEIGHT,
-  getContentHeight,
-} from "@shared/utils/dimensions";
+  resetVideoDataUsage,
+  useVideoDataUsage,
+} from "../model/videoDataUsageStore";
+import { useVideoDataUsageTracker } from "../model/videoDataUsageTracker";
 
 const DOUBLE_TAP_DELAY = 250;
 
@@ -140,7 +141,6 @@ interface VideoFeedItemProps {
   isCompleted: boolean;
   onToggleLike: (videoId: string, nextLike: boolean) => void;
   isLikePending: boolean;
-  shouldPreload?: boolean;
   isTabFocused: boolean;
 }
 
@@ -150,7 +150,6 @@ const VideoFeedItemComponent = ({
   isCompleted,
   onToggleLike,
   isLikePending,
-  shouldPreload = false,
   isTabFocused,
 }: VideoFeedItemProps) => {
   const insets = useSafeAreaInsets();
@@ -173,13 +172,34 @@ const VideoFeedItemComponent = ({
   const [isPlaying, setIsPlaying] = useState(false);
   const [isBuffering, setIsBuffering] = useState(false);
   const [isSeeking, setIsSeeking] = useState(false);
-  // Initialize shouldLoad based on shouldPreload prop
-  const [shouldLoad, setShouldLoad] = useState(shouldPreload);
+  const shouldLoad = isActive && isTabFocused;
+  const totalUsageBytes = useVideoDataUsage();
 
-  // Create video player using expo-video - always create with URL for proper initialization
-  const player = useVideoPlayer(content.videoUrl, (player) => {
+  const videoSource = useMemo(() => {
+    if (!shouldLoad) {
+      return null;
+    }
+
+    if (content.videoUrl.includes(".m3u8")) {
+      return {
+        uri: content.videoUrl,
+        contentType: "hls" as const,
+        bufferOptions: {
+          preferredForwardBufferDuration: 15000,
+          minBufferForPlayback: 1000,
+          waitsToMinimizeStalling: true,
+        },
+      };
+    }
+
+    return { uri: content.videoUrl };
+  }, [content.videoUrl, shouldLoad]);
+
+  // Create video player using expo-video
+  const player = useVideoPlayer(videoSource, (player) => {
     player.loop = true;
     player.volume = 1.0;
+    player.timeUpdateEventInterval = 0.5;
   });
 
   const updateIsSeeking = useCallback((value: boolean) => {
@@ -238,13 +258,6 @@ const VideoFeedItemComponent = ({
     return translationChunks[0] ?? null;
   }, [activeChunkIndex, translationChunks]);
 
-  // Update shouldLoad when shouldPreload or isActive changes
-  useEffect(() => {
-    if ((shouldPreload || isActive) && !shouldLoad) {
-      setShouldLoad(true);
-    }
-  }, [shouldPreload, isActive, shouldLoad]);
-
   // Reset video state when content changes
   useEffect(() => {
     isSeekingRef.current = false;
@@ -255,32 +268,71 @@ const VideoFeedItemComponent = ({
     updateIsSeeking(false);
   }, [content.id, updateIsSeeking]);
 
+  useEffect(() => {
+    if (shouldLoad) {
+      setIsBuffering(true);
+    } else {
+      setIsPlaying(false);
+    }
+  }, [shouldLoad]);
+
+  useVideoDataUsageTracker(player, {
+    enabled: shouldLoad,
+    contentId: content.id,
+  });
+
+  const formattedUsage = useMemo(() => {
+    const bytes = totalUsageBytes;
+    if (bytes <= 0) {
+      return "0 KB";
+    }
+    const megabytes = bytes / (1024 * 1024);
+    if (megabytes >= 1) {
+      return `${megabytes.toFixed(2)} MB`;
+    }
+    const kilobytes = bytes / 1024;
+    return `${kilobytes.toFixed(1)} KB`;
+  }, [totalUsageBytes]);
+
+  const handleResetUsage = useCallback(() => {
+    resetVideoDataUsage();
+  }, []);
+
   // Track player status with polling
   useEffect(() => {
     if (!player || !shouldLoad) return;
 
+    const readSafe = <T>(operation: () => T, fallback: T): T => {
+      try {
+        return operation();
+      } catch {
+        return fallback;
+      }
+    };
+
     const interval = setInterval(() => {
-      // Update duration
-      if (player.duration && player.duration !== duration) {
-        setDuration(player.duration);
-        // Once we have duration, video is loaded
-        if (isBuffering && player.duration > 0) {
+      const currentDuration = readSafe(() => player.duration, duration);
+      if (currentDuration && currentDuration !== duration) {
+        setDuration(currentDuration);
+        if (isBuffering && currentDuration > 0) {
           setIsBuffering(false);
         }
       }
 
-      // Update current time
-      if (!isSeekingRef.current && player.currentTime !== currentTime) {
-        setCurrentTime(player.currentTime);
+      if (!isSeekingRef.current) {
+        const nextTime = readSafe(() => player.currentTime, currentTime);
+        if (nextTime !== currentTime) {
+          setCurrentTime(nextTime);
+        }
       }
 
-      // Update playing status
-      if (player.playing !== isPlaying) {
-        setIsPlaying(player.playing);
+      const playingStatus = readSafe(() => player.playing, isPlaying);
+      if (playingStatus !== isPlaying) {
+        setIsPlaying(playingStatus);
       }
 
-      // Update buffering status - buffering if no duration yet and video should be active
-      const shouldBuffer = !player.duration || player.duration === 0;
+      const shouldBuffer =
+        readSafe(() => !player.duration || player.duration === 0, isBuffering);
       if (shouldBuffer !== isBuffering) {
         setIsBuffering(shouldBuffer);
       }
@@ -300,10 +352,14 @@ const VideoFeedItemComponent = ({
 
   const togglePlayback = useCallback(() => {
     if (!player) return;
-    if (isPlaying) {
-      player.pause();
-    } else {
-      player.play();
+    try {
+      if (isPlaying) {
+        player.pause();
+      } else {
+        player.play();
+      }
+    } catch {
+      return;
     }
 
     // Show pause/play icon animation
@@ -435,28 +491,57 @@ const VideoFeedItemComponent = ({
       return;
     }
 
-    player.volume = globalVolume;
+    try {
+      player.volume = globalVolume;
+    } catch {
+      // Player might already be released - ignore
+    }
   }, [content.id, globalVolume, isActive, player]);
 
   // Control playback based on active state and tab focus
   useEffect(() => {
     if (!player) return;
 
-    const shouldPlay = isActive && isTabFocused;
-
-    // Use timeout to ensure this runs after VideoView is mounted
-    const timer = setTimeout(() => {
-      if (!player) return;
-
-      if (shouldPlay) {
-        player.play();
-      } else {
-        player.pause();
+    const runSafe = (operation: () => void) => {
+      try {
+        operation();
+      } catch {
+        // ignore errors from released player
       }
-    }, 50);
+    };
 
-    return () => clearTimeout(timer);
-  }, [isActive, isTabFocused, content.id, player]);
+    const play = () => runSafe(() => player.play());
+    const pause = () => runSafe(() => player.pause());
+
+    if (!shouldLoad) {
+      pause();
+      runSafe(() => {
+        player.muted = false;
+        player.volume = globalVolume;
+      });
+      return () => {
+        pause();
+      };
+    }
+
+    runSafe(() => {
+      player.loop = true;
+    });
+
+    if (isActive && isTabFocused) {
+      runSafe(() => {
+        player.muted = false;
+        player.volume = globalVolume;
+      });
+      play();
+    } else {
+      pause();
+    }
+
+    return () => {
+      pause();
+    };
+  }, [player, shouldLoad, isActive, isTabFocused, globalVolume]);
 
   const levelColor = useMemo(
     () => getLevelColor(content.analysis.cefrLevel),
@@ -523,18 +608,43 @@ const VideoFeedItemComponent = ({
         >
           {content.likesCount}
         </Typography>
+        <View style={styles.usageContainer}>
+          <Typography
+            variant="caption"
+            style={styles.usageText}
+            enableWordLookup={false}
+          >
+            Трафик: {formattedUsage}
+          </Typography>
+          <TouchableOpacity
+            onPress={handleResetUsage}
+            style={styles.resetButton}
+            activeOpacity={0.7}
+          >
+            <Typography
+              variant="caption"
+              style={styles.resetButtonText}
+              enableWordLookup={false}
+            >
+              Сбросить
+            </Typography>
+          </TouchableOpacity>
+        </View>
       </View>
 
       {/* Video container with black background */}
       <View style={styles.videoContainer}>
-        {shouldLoad ? (
+        {shouldLoad && player ? (
           <VideoView
             player={player}
             style={[
               styles.video,
-              { width: SCREEN_WIDTH, height: SCREEN_HEIGHT },
+              {
+                width: SCREEN_WIDTH,
+                height: SCREEN_HEIGHT,
+              },
             ]}
-            contentFit="contain"
+            contentFit="cover"
             nativeControls={false}
             pointerEvents="none"
           />
@@ -553,7 +663,7 @@ const VideoFeedItemComponent = ({
       </View>
 
       {/* Buffering indicator - only show when video is loading but not playing */}
-      {shouldLoad && isBuffering && !isPlaying && (
+      {shouldLoad && player && isBuffering && !isPlaying && (
         <View style={styles.bufferingContainer}>
           <View style={styles.bufferingSpinner}>
             <ActivityIndicator size="large" color="#FFFFFF" />
@@ -762,16 +872,34 @@ const styles = StyleSheet.create({
   likeCountActive: {
     color: "#E11D48",
   },
+  usageContainer: {
+    alignItems: "center",
+    marginTop: 8,
+  },
+  usageText: {
+    color: "#FFFFFF",
+    opacity: 0.8,
+  },
+  resetButton: {
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 12,
+    backgroundColor: "rgba(255, 255, 255, 0.15)",
+    marginTop: 4,
+  },
+  resetButtonText: {
+    color: "#FFFFFF",
+    fontWeight: "600",
+  },
   videoContainer: {
     flex: 1,
     width: "100%",
     backgroundColor: "#000000",
     alignItems: "center",
-    justifyContent: "flex-start",
+    justifyContent: "center",
   },
   video: {
-    width: "100%",
-    height: "100%",
+    // Temporarily scaled down by 10% to check cropping
   },
   videoInner: {
     width: "100%",
@@ -1000,7 +1128,6 @@ const areVideoFeedItemPropsEqual = (
   if (prev.isActive !== next.isActive) return false;
   if (prev.isCompleted !== next.isCompleted) return false;
   if (prev.isLikePending !== next.isLikePending) return false;
-  if (prev.shouldPreload !== next.shouldPreload) return false;
   if (prev.isTabFocused !== next.isTabFocused) return false;
   if (prev.onToggleLike !== next.onToggleLike) return false;
   if (!areVideoContentsEqual(prev.content, next.content)) return false;

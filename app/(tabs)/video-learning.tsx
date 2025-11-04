@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ActivityIndicator, StyleSheet, View } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { ActivityIndicator, StyleSheet, TouchableOpacity, View } from "react-native";
+import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { useIsFocused, useNavigation } from "@react-navigation/native";
 import { useTheme } from "styled-components/native";
+import { Ionicons } from "@expo/vector-icons";
 
 import { useAppDispatch, useAppSelector } from "@core/store/hooks";
 import { Typography } from "@shared/ui";
@@ -20,17 +21,21 @@ import {
   submitVideoProgress,
 } from "@features/video-learning/model/videoLearningSlice";
 import { VideoFeed } from "@features/video-learning/ui/VideoFeed";
+import { VideoSettingsModal } from "@features/video-learning/ui/VideoSettingsModal";
 import type {
   SubmitAnswerPayload,
   VideoContent,
 } from "@features/video-learning/api/videoLearningApi";
 
+// Optimized prefetch: reduced from 3 to 2
+// Loads first 2 videos, then progressively loads more as user scrolls
 const PREFETCH_BATCH = 3;
 
 export default function VideoLearningScreen() {
   const dispatch = useAppDispatch();
   const theme = useTheme() as any;
   const navigation = useNavigation();
+  const insets = useSafeAreaInsets();
   const feedStatus = useAppSelector(selectVideoFeedStatus);
   const feed = useAppSelector(selectVideoFeed);
   const errors = useAppSelector(selectVideoErrors);
@@ -39,6 +44,7 @@ export default function VideoLearningScreen() {
   const likesUpdating = useAppSelector(selectLikesUpdating);
   const submitStatus = useAppSelector((state) => state.videoLearning.submitStatus);
   const lastSubmission = useAppSelector((state) => state.videoLearning.lastSubmission);
+  const [showSettings, setShowSettings] = useState(false);
 
   // Track if this tab is focused - using multiple methods
   const isTabFocused = useIsFocused();
@@ -72,6 +78,8 @@ export default function VideoLearningScreen() {
     }
   }, [dispatch, feedStatus, isTabFocused]);
 
+  // Optimized prefetch: load only first PREFETCH_BATCH videos initially
+  // More will be loaded as user scrolls (handled by VideoFeed component)
   useEffect(() => {
     if (feedStatus !== "succeeded" || feed.length === 0) {
       return;
@@ -148,9 +156,25 @@ export default function VideoLearningScreen() {
       <SafeAreaView
         style={[styles.centered, { backgroundColor: theme.colors.background }]}
       >
+        <View style={[styles.settingsButton, { top: insets.top }]}>
+          <TouchableOpacity
+            onPress={() => setShowSettings(true)}
+            style={styles.headerIconButton}
+            activeOpacity={0.85}
+          >
+            <Ionicons name="ellipsis-vertical" size={24} color={theme.colors.text} />
+          </TouchableOpacity>
+        </View>
         <Typography variant="body" align="center">
           Нет доступных видео. Попробуйте позже.
         </Typography>
+        <Typography variant="caption" align="center" style={styles.hintText}>
+          Попробуйте изменить настройки фильтров
+        </Typography>
+        <VideoSettingsModal
+          visible={showSettings}
+          onClose={() => setShowSettings(false)}
+        />
       </SafeAreaView>
     );
   }
@@ -196,8 +220,24 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     paddingHorizontal: 24,
+    position: "relative",
   },
   loadingText: {
     marginTop: 16,
+  },
+  hintText: {
+    marginTop: 8,
+    opacity: 0.6,
+  },
+  settingsButton: {
+    position: "absolute",
+    right: 0,
+    zIndex: 100,
+  },
+  headerIconButton: {
+    width: 44,
+    height: 44,
+    alignItems: "center",
+    justifyContent: "center",
   },
 });

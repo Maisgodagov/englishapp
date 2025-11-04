@@ -21,6 +21,7 @@ import {
   videoLearningApi,
 } from '@features/video-learning/api/videoLearningApi';
 import { SCREEN_WIDTH, WINDOW_HEIGHT } from '@shared/utils/dimensions';
+import { useVideoDataUsageTracker } from '../model/videoDataUsageTracker';
 
 const VIDEO_WIDTH = SCREEN_WIDTH * 0.88;
 const VIDEO_HEIGHT = WINDOW_HEIGHT * 0.55;
@@ -42,11 +43,32 @@ const VideoCard = React.memo(({ snippet, phrase, theme, isActive }: VideoCardPro
   const startSeconds = snippet.startSeconds;
   const endSeconds = snippet.endSeconds;
 
+  const shouldLoad = isActive;
+  const videoSource = React.useMemo(() => {
+    if (!shouldLoad) {
+      return null;
+    }
+
+    if (snippet.videoUrl.includes('.m3u8')) {
+      return {
+        uri: snippet.videoUrl,
+        contentType: 'hls' as const,
+      };
+    }
+
+    return { uri: snippet.videoUrl };
+  }, [shouldLoad, snippet.videoUrl]);
+
   // Create video player
-  const player = useVideoPlayer(snippet.videoUrl, (player) => {
-    player.loop = false;
-    player.volume = 1.0;
-  });
+  // Explicitly specify HLS content type for master.m3u8 playlists
+  const player = useVideoPlayer(
+    videoSource,
+    (player) => {
+      player.loop = false;
+      player.volume = 1.0;
+      player.timeUpdateEventInterval = 0.5;
+    }
+  );
 
   // Track player status
   React.useEffect(() => {
@@ -76,7 +98,7 @@ const VideoCard = React.memo(({ snippet, phrase, theme, isActive }: VideoCardPro
 
   // Auto play/pause based on active state
   React.useEffect(() => {
-    if (!isReady || !player) return;
+    if (!player || !isReady) return;
 
     if (isActive && !isPlaying) {
       player.currentTime = startSeconds;
@@ -85,6 +107,26 @@ const VideoCard = React.memo(({ snippet, phrase, theme, isActive }: VideoCardPro
       player.pause();
     }
   }, [isActive, isReady, isPlaying, player, startSeconds]);
+
+  React.useEffect(() => {
+    if (!shouldLoad) {
+      if (player) {
+        try {
+          player.pause();
+        } catch {
+          // ignore
+        }
+      }
+      setIsPlaying(false);
+      setIsReady(false);
+      isPlayingRef.current = false;
+    }
+  }, [shouldLoad, player]);
+
+  useVideoDataUsageTracker(player, {
+    enabled: shouldLoad,
+    contentId: snippet.id,
+  });
 
   const handlePlayPause = () => {
     if (!player || !isReady || !isActive) {
@@ -133,12 +175,16 @@ const VideoCard = React.memo(({ snippet, phrase, theme, isActive }: VideoCardPro
     <View style={styles.videoCard}>
       <View style={styles.videoWrapper}>
         <Pressable onPress={handlePlayPause} style={styles.videoContainer}>
-          <VideoView
-            player={player}
-            style={styles.video}
-            contentFit="cover"
-            nativeControls={false}
-          />
+          {player ? (
+            <VideoView
+              player={player}
+              style={styles.video}
+              contentFit="cover"
+              nativeControls={false}
+            />
+          ) : (
+            <View style={[styles.video, { backgroundColor: '#000' }]} />
+          )}
 
           {snippet.contextText && (
             <View style={styles.subtitleOverlay}>
@@ -146,7 +192,7 @@ const VideoCard = React.memo(({ snippet, phrase, theme, isActive }: VideoCardPro
             </View>
           )}
 
-          {!isReady && (
+          {shouldLoad && !isReady && (
             <View style={styles.loadingOverlay}>
               <ActivityIndicator size="large" color="#FFFFFF" />
             </View>

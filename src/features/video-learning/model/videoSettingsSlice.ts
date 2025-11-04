@@ -26,7 +26,8 @@ const initialState: VideoSettingsState = {
   difficultyLevel: 'all',
   speechSpeed: 'all',
   showAdultContent: true,
-  moderationFilter: 'moderated',
+  // Use 'all' in development for easier testing, 'moderated' in production
+  moderationFilter: __DEV__ ? 'all' : 'moderated',
 };
 
 const videoSettingsSlice = createSlice({

@@ -47,10 +47,17 @@ export const VideoLearningSession = ({
   const [duration, setDuration] = useState(0);
 
   // Create video player using expo-video
-  const player = useVideoPlayer(content.videoUrl, (player) => {
-    player.loop = false;
-    player.volume = 1.0;
-  });
+  // Explicitly specify HLS content type for master.m3u8 playlists
+  const player = useVideoPlayer(
+    {
+      uri: content.videoUrl,
+      ...(content.videoUrl.includes('.m3u8') && { contentType: 'hls' as const }),
+    },
+    (player) => {
+      player.loop = false;
+      player.volume = 1.0;
+    }
+  );
   const [activeView, setActiveView] = useState<'video' | 'exercises'>('video');
   const [answers, setAnswers] = useState<Record<string, number>>({});
   const [currentExerciseIndex, setCurrentExerciseIndex] = useState(0);

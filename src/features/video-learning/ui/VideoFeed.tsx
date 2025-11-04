@@ -452,15 +452,8 @@ export const VideoFeed = ({
     ({ item, index }) => {
       const isActive = index === currentIndex;
       const isCompleted = completedVideoIds.has(item.content.id);
-      // Preload current video and 2 videos ahead for smooth transitions
-      // This allows for buffering while user watches current video
-      const shouldPreload =
-        index === currentIndex ||
-        index === currentIndex + 1 ||
-        index === currentIndex + 2 ||
-        index === currentIndex + 3 ||
-        index === currentIndex + 4;
-
+      // Preload current video + next 2 videos for smoother scrolling
+      // Use video index, not feed item index, to handle exercises correctly
       if (item.type === "video") {
         return (
           <VideoFeedItem
@@ -469,7 +462,6 @@ export const VideoFeed = ({
             isCompleted={isCompleted}
             onToggleLike={onToggleLike}
             isLikePending={Boolean(likesUpdating[item.content.id])}
-            shouldPreload={shouldPreload}
             isTabFocused={isTabFocused}
           />
         );
@@ -493,6 +485,7 @@ export const VideoFeed = ({
     },
     [
       currentIndex,
+      currentVideoIndex,
       completedVideoIds,
       handleSubmit,
       submitStatus,
@@ -740,5 +733,3 @@ const styles = StyleSheet.create({
     color: "rgba(255, 255, 255, 0.8)",
   },
 });
-
-

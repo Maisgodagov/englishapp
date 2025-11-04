@@ -96,7 +96,8 @@ export const fetchVideoFeed = createAsyncThunk<VideoFeedResponse, void, { state:
     const cefrLevels = mapDifficultyToCefrLevels(state.videoSettings.difficultyLevel);
     const speechSpeeds = mapSpeechSpeedToValues(state.videoSettings.speechSpeed);
     const isAdmin = state.user.profile?.role === 'admin';
-    const moderationFilter = isAdmin ? state.videoSettings.moderationFilter : 'moderated';
+    // TEMPORARY: Show all videos in development, only moderated in production
+    const moderationFilter = isAdmin ? state.videoSettings.moderationFilter : (__DEV__ ? 'all' : 'moderated');
 
     return videoLearningApi.getFeed(userId, {
       limit: 1,
@@ -121,7 +122,8 @@ export const fetchVideoFeedWithRelaxation = createAsyncThunk<
     const cefrLevels = mapDifficultyToCefrLevels(state.videoSettings.difficultyLevel);
     const speechSpeeds = mapSpeechSpeedToValues(state.videoSettings.speechSpeed);
     const isAdmin = state.user.profile?.role === 'admin';
-    const moderationFilter = isAdmin ? state.videoSettings.moderationFilter : 'moderated';
+    // TEMPORARY: Show all videos in development, only moderated in production
+    const moderationFilter = isAdmin ? state.videoSettings.moderationFilter : (__DEV__ ? 'all' : 'moderated');
 
     const response = await videoLearningApi.getFeed(userId, {
       limit: 1,
@@ -194,7 +196,8 @@ export const loadMoreVideoFeed = createAsyncThunk<
     const cefrLevels = mapDifficultyToCefrLevels(state.videoSettings.difficultyLevel);
     const speechSpeeds = mapSpeechSpeedToValues(state.videoSettings.speechSpeed);
     const isAdmin = state.user.profile?.role === 'admin';
-    const moderationFilter = isAdmin ? state.videoSettings.moderationFilter : 'moderated';
+    // TEMPORARY: Show all videos in development, only moderated in production
+    const moderationFilter = isAdmin ? state.videoSettings.moderationFilter : (__DEV__ ? 'all' : 'moderated');
 
     // Try to load more with cursor if available and hasMore is true
     if (cursor && hasMoreFeed) {
