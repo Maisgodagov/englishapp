@@ -27,9 +27,9 @@ export default function TabLayout() {
         }}
       />
       <Tabs.Screen
-        name="cources"
+        name="video-dictionary"
         options={{
-          title: "Courses",
+          title: "Видеословарь",
           tabBarIcon: ({ color }) => (
             <Ionicons name="book" size={28} color={color} />
           ),

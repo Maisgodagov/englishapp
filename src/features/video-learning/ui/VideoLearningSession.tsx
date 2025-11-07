@@ -133,17 +133,11 @@ export const VideoLearningSession = ({
   }, [activeChunkIndex, translationChunks]);
 
   const handleVideoLoad = useCallback((data: OnLoadData) => {
-    console.log(`[VideoLearningSession ${content.id}] ✅ Video loaded:`, {
-      duration: Math.floor(data.duration),
-      naturalSize: data.naturalSize,
-      videoTracks: data.videoTracks?.length ?? 0,
-      audioTracks: data.audioTracks?.length ?? 0,
-    });
     setDuration(data.duration);
     setCurrentTime(data.currentTime ?? 0);
     // Track data usage from load event
     dataUsageTracker.handleLoad(data);
-  }, [content.id, dataUsageTracker]);
+  }, [dataUsageTracker]);
 
   const handleVideoProgress = useCallback((data: OnProgressData) => {
     setCurrentTime(data.currentTime);
@@ -161,11 +155,10 @@ export const VideoLearningSession = ({
   }, [dataUsageTracker]);
 
   const handleVideoEnd = useCallback(() => {
-    console.log(`[VideoLearningSession ${content.id}] ⏹️ Video ended`);
     setIsPlaying(false);
     setShowControls(true);
     setCurrentTime((prev) => (duration > 0 ? duration : prev));
-  }, [content.id, duration]);
+  }, [duration]);
 
   const handleVideoBandwidthUpdate = useCallback((data: OnBandwidthUpdateData) => {
     dataUsageTracker.handleBandwidthUpdate(data);
@@ -244,7 +237,6 @@ export const VideoLearningSession = ({
 
   // Reset state when content changes
   useEffect(() => {
-    console.log(`[VideoLearningSession ${content.id}] 🔄 Content changed - resetting state`);
     setActiveView('video');
     setAnswers({});
     setCurrentExerciseIndex(0);
@@ -260,13 +252,12 @@ export const VideoLearningSession = ({
 
   // Auto play when returning to video view
   useEffect(() => {
-    console.log(`[VideoLearningSession ${content.id}] 👁️ View changed to: ${activeView}, playing: ${activeView === 'video'}`);
     if (activeView === 'video') {
       setIsPlaying(true);
     } else {
       setIsPlaying(false);
     }
-  }, [activeView, content.id]);
+  }, [activeView]);
 
   // Fade in when content changes
   useEffect(() => {

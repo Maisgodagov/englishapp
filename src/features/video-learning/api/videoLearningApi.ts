@@ -98,6 +98,8 @@ export interface PhraseSnippet {
   phrase: string;
   durationSeconds: number | null;
   audioLevel?: number;
+  translationMatchedText?: string;
+  translationContextText?: string;
 }
 
 export interface PhraseSearchResponse {
@@ -178,14 +180,24 @@ export const videoLearningApi = {
       headers: buildHeaders(userId, userRole),
     });
   },
-  searchPhrase(phrase: string, limit?: number, userId?: string | null) {
+  searchPhrase(
+    phrase: string,
+    limit?: number,
+    userId?: string | null,
+    paddingSeconds?: number,
+    signal?: AbortSignal,
+  ) {
     const params = new URLSearchParams();
     params.append('phrase', phrase);
     if (limit && limit > 0) {
       params.append('limit', limit.toString());
     }
+    if (typeof paddingSeconds === 'number' && paddingSeconds >= 0) {
+      params.append('paddingSeconds', Math.floor(paddingSeconds).toString());
+    }
     return apiFetch<PhraseSearchResponse>(`video-learning/search?${params.toString()}`, {
       headers: userId ? buildHeaders(userId) : undefined,
+      signal,
     });
   },
   submitProgress(userId: string, contentId: string, answers: SubmitAnswerPayload[]) {

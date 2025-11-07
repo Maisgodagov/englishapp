@@ -108,6 +108,10 @@ export const VideoFeed = ({
   const previousVideoCountRef = useRef(videos.length);
   const previousViewModeRef = useRef(viewMode);
 
+  // Prefetch state - track which video index should be prefetched
+  const [prefetchVideoIndex, setPrefetchVideoIndex] = useState<number | null>(null);
+  const prefetchCancelledRef = useRef(false);
+
   // Calculate content height excluding safe areas
   const SCREEN_HEIGHT = useMemo(
     () => getContentHeight(insets.top, insets.bottom),
@@ -133,11 +137,6 @@ export const VideoFeed = ({
 
   useEffect(() => {
     if (currentItem && currentItem.index !== activeVideoIndex) {
-      console.log(`[VideoFeed] 📍 Active video changed: ${activeVideoIndex} → ${currentItem.index}`, {
-        currentIndex,
-        feedItemType: currentItem.type,
-        videoId: currentItem.content.id.slice(0, 8),
-      });
       setActiveVideoIndex(currentItem.index);
     }
   }, [currentItem, activeVideoIndex, currentIndex]);
@@ -277,7 +276,30 @@ export const VideoFeed = ({
       clearTimeout(blockMessageTimerRef.current);
       blockMessageTimerRef.current = null;
     }
-  }, []);
+
+    // Start prefetching next video when user begins scrolling
+    const currentIdx = currentIndexRef.current;
+    const currentFeedItem = feedItems[currentIdx];
+
+    if (currentFeedItem) {
+      // Find the next video item (skip exercise rows)
+      let nextVideoIdx = -1;
+      for (let i = currentIdx + 1; i < feedItems.length; i += 1) {
+        if (feedItems[i].type === "video") {
+          nextVideoIdx = i;
+          break;
+        }
+      }
+
+      if (nextVideoIdx !== -1) {
+        const nextVideoItem = feedItems[nextVideoIdx];
+        if (prefetchVideoIndex !== nextVideoItem.index) {
+          prefetchCancelledRef.current = false;
+          setPrefetchVideoIndex(nextVideoItem.index);
+        }
+      }
+    }
+  }, [feedItems, prefetchVideoIndex]);
 
   const computeTargetIndex = useCallback(
     (
@@ -338,6 +360,12 @@ export const VideoFeed = ({
         velocityY,
       });
 
+      // Cancel prefetch if user didn't actually scroll to next video
+      if (targetIndex === previousIndex && prefetchVideoIndex !== null) {
+        prefetchCancelledRef.current = true;
+        setPrefetchVideoIndex(null);
+      }
+
       if (targetIndex !== previousIndex) {
         currentIndexRef.current = targetIndex;
         setCurrentIndex(targetIndex);
@@ -350,7 +378,7 @@ export const VideoFeed = ({
         });
       }
     },
-    [computeTargetIndex, feedItems.length]
+    [computeTargetIndex, feedItems.length, prefetchVideoIndex]
   );
 
   const handleMomentumScrollEnd = useCallback(
@@ -460,6 +488,9 @@ export const VideoFeed = ({
       // Preload current video + next 2 videos for smoother scrolling
       // Use video index, not feed item index, to handle exercises correctly
       if (item.type === "video") {
+        // Check if this video should be prefetched
+        const shouldPrefetch = prefetchVideoIndex === item.index;
+
         return (
           <VideoFeedItem
             content={item.content}
@@ -468,6 +499,8 @@ export const VideoFeed = ({
             onToggleLike={onToggleLike}
             isLikePending={Boolean(likesUpdating[item.content.id])}
             isTabFocused={isTabFocused}
+            shouldPrefetch={shouldPrefetch}
+            prefetchCancelled={prefetchCancelledRef.current}
           />
         );
       }
@@ -499,6 +532,7 @@ export const VideoFeed = ({
       likesUpdating,
       onToggleLike,
       isTabFocused,
+      prefetchVideoIndex,
     ]
   );
 
@@ -546,18 +580,17 @@ export const VideoFeed = ({
     <View style={styles.container}>
       <View style={[styles.settingsButton, { top: insets.top }]}>
         {isAdmin && currentVideo && (
-          <View style={styles.moderationAction}>
-            <TouchableOpacity
-              onPress={() => setShowModeration(true)}
-              style={styles.headerIconButton}
-              activeOpacity={0.85}
-            >
-              <Ionicons name="create-outline" size={22} color="#fff" />
-            </TouchableOpacity>
-            <Typography variant="caption" style={styles.moderationStatusText}>
-              {currentVideo.isModerated ? 'Видео прошло модерацию' : 'Видео ожидает модерации'}
-            </Typography>
-          </View>
+          <TouchableOpacity
+            onPress={() => setShowModeration(true)}
+            style={styles.headerIconButton}
+            activeOpacity={0.85}
+          >
+            <Ionicons
+              name="create-outline"
+              size={22}
+              color={currentVideo.isModerated ? '#4CAF50' : '#EF4444'}
+            />
+          </TouchableOpacity>
         )}
         <TouchableOpacity
           onPress={() => setShowSettings(true)}
@@ -567,24 +600,6 @@ export const VideoFeed = ({
           <Ionicons name="ellipsis-vertical" size={24} color="#fff" />
         </TouchableOpacity>
       </View>
-
-      {isAdmin && currentVideo && (
-        <View
-          style={[
-            styles.moderationBadge,
-            {
-              top: (insets.top ?? 0) + 56,
-              backgroundColor: currentVideo.isModerated
-                ? 'rgba(22, 163, 74, 0.8)'
-                : 'rgba(234, 179, 8, 0.85)',
-            },
-          ]}
-        >
-          <Typography variant="caption" style={styles.moderationBadgeText}>
-            {currentVideo.isModerated ? 'Видео прошло модерацию' : 'Видео ожидает модерации'}
-          </Typography>
-        </View>
-      )}
 
       <FlatList
         ref={flatListRef}
@@ -607,6 +622,7 @@ export const VideoFeed = ({
         windowSize={2}  // CRITICAL: Reduced from 3 to 2 - only render current + next video to save bandwidth
         initialNumToRender={1}
         updateCellsBatchingPeriod={50}
+        extraData={prefetchVideoIndex}
         ListFooterComponent={footerComponent}
       />
 
@@ -640,7 +656,7 @@ export const VideoFeed = ({
         onClose={() => setShowSettings(false)}
       />
 
-      {isAdmin && currentVideo && (
+      {isAdmin && (
         <VideoModerationModal
           visible={showModeration}
           onClose={() => setShowModeration(false)}
@@ -738,3 +754,4 @@ const styles = StyleSheet.create({
     color: "rgba(255, 255, 255, 0.8)",
   },
 });
+

@@ -29,8 +29,6 @@ const headersWithUser = (userId: string) => ({ 'x-user-id': userId });
 
 export const dictionaryApi = {
   getUserDictionary(userId: string) {
-    console.log('[DictionaryAPI] Fetching dictionary for userId:', userId);
-    console.log('[DictionaryAPI] Headers:', headersWithUser(userId));
     return apiFetch<UserDictionaryEntry[]>(basePath, {
       headers: headersWithUser(userId),
     });

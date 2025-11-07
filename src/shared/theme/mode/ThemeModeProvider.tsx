@@ -52,7 +52,6 @@ export const AppThemeProvider = ({ children }: { children: ReactNode }) => {
         }
       } catch (error) {
         // Если не удалось загрузить с сервера, используем локальное хранилище
-        console.log('Failed to load theme from server, using local storage');
         try {
           if (Platform.OS === 'web' && typeof window !== 'undefined' && window.localStorage) {
             const saved = window.localStorage.getItem(`themeMode:${userId}`);

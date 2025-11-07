@@ -35,26 +35,14 @@ export default function ProfileScreen() {
   const [searchTerm, setSearchTerm] = useState("");
 
   useEffect(() => {
-    console.log("[Profile] Profile ID:", profile?.id);
-    console.log("[Profile] Dictionary status:", dictionaryStatus);
-
     if (profile?.id && dictionaryStatus === "idle") {
-      console.log("[Profile] Fetching dictionary for user:", profile.id);
       dispatch(fetchUserDictionary({ userId: profile.id }));
     }
   }, [profile?.id, dictionaryStatus, dispatch]);
 
   useEffect(() => {
-    console.log("[Profile] Dictionary items count:", dictionaryItems.length);
-    if (dictionaryItems.length > 0) {
-      console.log("[Profile] First item:", dictionaryItems[0]);
-    }
-  }, [dictionaryItems]);
-
-  useEffect(() => {
     return sound
       ? () => {
-          console.log("Unloading Sound");
           sound.unloadAsync();
         }
       : undefined;
@@ -65,7 +53,6 @@ export default function ProfileScreen() {
     wordId: string
   ) => {
     if (!audioUrl) {
-      console.log("No audio URL available");
       return;
     }
 
@@ -83,7 +70,6 @@ export default function ProfileScreen() {
         await sound.unloadAsync();
       }
 
-      console.log("Loading Sound from:", audioUrl);
       const { sound: newSound } = await Audio.Sound.createAsync(
         { uri: audioUrl },
         { shouldPlay: true }
