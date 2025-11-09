@@ -242,6 +242,7 @@ const VideoFeedItemComponent = ({
   );
 
   // CRITICAL: Memoize video style to prevent recreation
+  // Use full available height for vertical videos (like TikTok/Reels)
   const videoStyle = useMemo(
     () => [
       styles.video,
@@ -665,7 +666,6 @@ const VideoFeedItemComponent = ({
             muted={false}
             playInBackground={false}
             playWhenInactive={false}
-            preventsDisplaySleepDuringVideoPlayback={true}
             controls={false}  // Disable native video controls
             maxBitRate={2000000}  // Limit to 2 Mbps (~720p) to save bandwidth
             onLoad={handleVideoLoad}  // OPTIMIZATION: Use memoized handler to prevent Video recreation

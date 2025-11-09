@@ -70,6 +70,8 @@ interface VideoFeedProps {
   likesUpdating: Record<string, boolean>;
   onToggleLike: (contentId: string, like: boolean) => void;
   isTabFocused: boolean;
+  focusVideoId?: string | null;
+  onClearFocus?: () => void;
 }
 
 export const VideoFeed = ({
@@ -82,6 +84,8 @@ export const VideoFeed = ({
   likesUpdating,
   onToggleLike,
   isTabFocused,
+  focusVideoId,
+  onClearFocus,
 }: VideoFeedProps) => {
   const theme = useTheme() as any;
   const insets = useSafeAreaInsets();
@@ -152,6 +156,35 @@ export const VideoFeed = ({
       setShowModeration(false);
     }
   }, [isAdmin]);
+
+  useEffect(() => {
+    if (!focusVideoId) {
+      return;
+    }
+
+    const targetIndex = feedItems.findIndex(
+      (item) => item.type === "video" && item.content.id === focusVideoId
+    );
+
+    if (targetIndex === -1) {
+      return;
+    }
+
+    currentIndexRef.current = targetIndex;
+    setCurrentIndex(targetIndex);
+
+    requestAnimationFrame(() => {
+      const list = flatListRef.current;
+      if (!list) return;
+
+      try {
+        list.scrollToIndex({ index: targetIndex, animated: true });
+        onClearFocus?.();
+      } catch (error) {
+        console.warn("[VideoFeed] Failed to scroll to focused video:", error);
+      }
+    });
+  }, [focusVideoId, feedItems, onClearFocus]);
 
   useEffect(() => {
     if (previousViewModeRef.current === viewMode) {

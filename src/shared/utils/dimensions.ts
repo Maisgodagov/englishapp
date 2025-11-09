@@ -11,8 +11,10 @@ export const getContentHeight = (topInset: number, bottomInset: number): number 
   return WINDOW_HEIGHT - topInset - bottomInset;
 };
 
-// Video feed items currently occupy full content height (without tab bar).
+// Video feed items should account for tab bar height
 // Keep a separate helper for clarity so components can evolve independently.
+const TAB_BAR_HEIGHT = 50; // Tab bar height (adjusted to prevent over-cropping)
+
 export const getVideoFeedHeight = (topInset: number, bottomInset: number): number => {
-  return WINDOW_HEIGHT - topInset - bottomInset;
+  return WINDOW_HEIGHT - topInset - bottomInset - TAB_BAR_HEIGHT;
 };

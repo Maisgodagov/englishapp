@@ -8,9 +8,8 @@ import {
 import { useAppSelector, useAppDispatch } from "@core/store/hooks";
 import { resetAuthState } from "@features/auth/model/authSlice";
 import { clearProfile } from "@entities/user/model/userSlice";
-import { selectIsAdmin } from "@entities/user/model/selectors";
 import { useRouter } from "expo-router";
-import { Typography, PrimaryButton, SurfaceCard, SecondaryButton } from "@shared/ui";
+import { Typography, PrimaryButton, SurfaceCard } from "@shared/ui";
 import { useThemeMode } from "@shared/theme/ThemeProvider";
 import { SafeAreaView } from "react-native-safe-area-context";
 import Ionicons from "@expo/vector-icons/Ionicons";
@@ -19,7 +18,6 @@ import { roleDisplayName } from "@shared/constants/roles";
 
 export default function SettingsScreen() {
   const profile = useAppSelector((s) => s.user.profile);
-  const isAdmin = useAppSelector(selectIsAdmin);
   const dispatch = useAppDispatch();
   const router = useRouter();
   const { mode, toggle } = useThemeMode();
@@ -105,12 +103,6 @@ export default function SettingsScreen() {
             </View>
           </SurfaceCard>
 
-          {isAdmin && (
-            <SecondaryButton onPress={() => router.push("/admin")} style={styles.adminButton}>
-              Admin Panel
-            </SecondaryButton>
-          )}
-
           <PrimaryButton onPress={handleLogout} style={styles.logoutButton}>
             Выйти
           </PrimaryButton>
@@ -176,9 +168,6 @@ const getStyles = (theme: any) =>
       justifyContent: "space-between",
       alignItems: "center",
       paddingVertical: 8,
-    },
-    adminButton: {
-      marginTop: 4,
     },
     logoutButton: {
       backgroundColor: theme.colors.danger,

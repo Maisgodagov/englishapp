@@ -305,7 +305,6 @@ export const VideoLearningSession = ({
             muted={false}
             playInBackground={false}
             playWhenInactive={false}
-            preventsDisplaySleepDuringVideoPlayback={true}
             maxBitRate={2000000}  // Limit to 2 Mbps (~720p) to save bandwidth
             bufferConfig={bufferConfig}  // OPTIMIZATION: Use memoized config
             onLoad={handleVideoLoad}

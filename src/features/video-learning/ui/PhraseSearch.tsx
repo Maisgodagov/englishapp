@@ -1,4 +1,5 @@
-﻿import React, { useState, useRef, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from "react";
+
 import {
   ActivityIndicator,
   StyleSheet,
@@ -6,801 +7,899 @@ import {
   TextInput,
   View,
   Pressable,
-} from 'react-native';
-import { useTheme } from 'styled-components/native';
-import { useFocusEffect } from '@react-navigation/native';
-import Video, { OnLoadData, OnProgressData } from 'react-native-video';
-import Carousel from 'react-native-reanimated-carousel';
-import { Ionicons } from '@expo/vector-icons';
-import Animated, {
-  useAnimatedStyle,
-  withTiming,
-  useSharedValue,
-  Easing,
-} from 'react-native-reanimated';
+  type StyleProp,
+  type TextStyle,
+} from "react-native";
 
-import { useAppSelector } from '@core/store/hooks';
-import type { AppTheme } from '@shared/theme/theme';
-import { PrimaryButton, Typography } from '@shared/ui';
+import { useTheme } from "styled-components/native";
+
+import { useFocusEffect } from "@react-navigation/native";
+import { router } from "expo-router";
+
+import Video from "react-native-video";
+
+import Carousel from "react-native-reanimated-carousel";
+
+import * as FileSystem from "expo-file-system/legacy";
+
+import { Ionicons } from "@expo/vector-icons";
+
+import type { AppTheme } from "@shared/theme/theme";
+
+import { Typography } from "@shared/ui";
+
 import {
   type PhraseSnippet,
   type PhraseSearchResponse,
   videoLearningApi,
-} from '@features/video-learning/api/videoLearningApi';
-import { SCREEN_WIDTH, WINDOW_HEIGHT } from '@shared/utils/dimensions';
-import { useVideoDataUsageTracker } from '../model/videoDataUsageTracker';
-import { detectLanguage } from '@shared/utils/languageDetection';
-// Use ML Kit for fast local translation (fallback to MyMemory for better quality)
-import { translateEnToRu, getTranslationVariants, clearTranslationCache } from '@shared/services/mlkitTranslator';
+} from "@features/video-learning/api/videoLearningApi";
 
-// Вертикальное видео 9:16 соотношение, увеличенный размер
-const VIDEO_WIDTH = SCREEN_WIDTH * 0.88;
-const VIDEO_HEIGHT = VIDEO_WIDTH * (16 / 9);
+import { SCREEN_WIDTH } from "@shared/utils/dimensions";
 
-const DEFAULT_LIMIT = 6;
-const DEFAULT_PADDING_SECONDS = 1;
-const MAX_PADDING_SECONDS = 10;
-const MAX_TRANSLATION_VARIANTS = 1; // Reduced from 5 to 1 for faster search
-const VARIANT_SNIPPET_LIMIT = 1;
+import { detectLanguage } from "@shared/utils/languageDetection";
 
-// Simple in-memory cache for search results
-const searchCache = new Map<string, PhraseSearchResponse>();
-const MAX_CACHE_SIZE = 50;
+import { translateEnToRu, translateRuToEn } from "@shared/services/translator";
 
-const getCacheKey = (phrase: string, limit: number, paddingSeconds: number): string => {
-  return `${phrase.trim().toLowerCase()}|${limit}|${paddingSeconds}`;
-};
+import { useAppSelector } from "@core/store/hooks";
 
-const getFromCache = (key: string): PhraseSearchResponse | undefined => {
-  return searchCache.get(key);
-};
+import { UserRole } from "@shared/constants/roles";
 
-const setInCache = (key: string, value: PhraseSearchResponse): void => {
-  if (searchCache.size >= MAX_CACHE_SIZE) {
-    // Remove oldest entry
-    const firstKey = searchCache.keys().next().value;
-    if (firstKey) searchCache.delete(firstKey);
+type VideoComponentRef = React.ComponentRef<typeof Video>;
+
+const escapeRegExp = (value: string) =>
+  value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+const createHighlightRegex = (value: string): RegExp | null => {
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+
+  const flexibleGap = "[\\s'’,.?!-]*";
+  let pattern = "";
+
+  for (const char of trimmed) {
+    if (/\s/.test(char)) {
+      pattern += flexibleGap;
+    } else {
+      pattern += `${escapeRegExp(char)}${flexibleGap}`;
+    }
   }
-  searchCache.set(key, value);
+
+  if (!pattern) {
+    return null;
+  }
+
+  return new RegExp(pattern, "gi");
 };
 
-interface VideoCardProps {
-  snippet: PhraseSnippet;
-  phrase: string;
-  highlightPhrase?: string;
-  theme: AppTheme;
-  isActive: boolean;
-  isScreenFocused: boolean;
-  onPlaybackReady?: () => void;
-}
+const buildHighlightedChildren = (
+  text: string,
+  highlight: string,
+  highlightStyle: StyleProp<TextStyle>
+): React.ReactNode[] | string => {
+  const regex = createHighlightRegex(highlight);
+  if (!regex) {
+    return text;
+  }
 
-interface VariantSnippetResult {
-  variant: string;
-  snippet: PhraseSnippet | null;
-}
+  const segments: React.ReactNode[] = [];
+  let lastIndex = 0;
+  let match: RegExpExecArray | null;
+  let key = 0;
 
-const VideoCard = React.memo(({ snippet, phrase, highlightPhrase, theme, isActive, isScreenFocused, onPlaybackReady }: VideoCardProps) => {
-  const [isReady, setIsReady] = React.useState(false);
-  const [hasError, setHasError] = React.useState(false);
-  const [showEnglish, setShowEnglish] = React.useState(true);
-  const [showRussian, setShowRussian] = React.useState(true);
-  const videoRef = React.useRef<Video>(null);
-  const hasInitializedRef = React.useRef(false);
-  const loopCheckIntervalRef = React.useRef<NodeJS.Timeout | null>(null);
-  const hasReportedPlaybackRef = React.useRef(false);
+  while ((match = regex.exec(text)) !== null) {
+    const matchText = match[0];
 
-  const dataUsageTracker = useVideoDataUsageTracker({
-    enabled: isActive,
-    contentId: snippet.id,
-  });
-
-  // OPTIMIZATION: Memoize video source to prevent recreation
-  const videoSource = React.useMemo(
-    () => snippet.videoUrl.includes('.m3u8')
-      ? { uri: snippet.videoUrl, type: 'm3u8' as const }
-      : { uri: snippet.videoUrl },
-    [snippet.videoUrl]
-  );
-
-  // OPTIMIZATION: Memoize bufferConfig to prevent Video component recreation
-  const bufferConfig = React.useMemo(
-    () => ({
-      minBufferMs: 1500,
-      maxBufferMs: 2500,
-      bufferForPlaybackMs: 800,
-      bufferForPlaybackAfterRebufferMs: 1200,
-    }),
-    []
-  );
-
-  const handleLoad = React.useCallback(
-    (data: OnLoadData) => {
-      dataUsageTracker.handleLoad(data);
-      setIsReady(true);
-
-      // Seek to start position immediately on load
-      if (isActive && isScreenFocused && !hasInitializedRef.current) {
-        hasInitializedRef.current = true;
-        // Use setTimeout to ensure video is ready
-        setTimeout(() => {
-          videoRef.current?.seek(snippet.startSeconds);
-        }, 100);
+    if (!matchText) {
+      if (regex.lastIndex < text.length) {
+        regex.lastIndex += 1;
+        continue;
       }
-    },
-    [dataUsageTracker, isActive, isScreenFocused, snippet.startSeconds]
-  );
-
-  const handleProgress = React.useCallback(
-    (data: OnProgressData) => {
-      dataUsageTracker.handleProgress(data);
-
-      // Loop logic: check if we've passed the end time
-      if (isActive && isScreenFocused && data.currentTime >= snippet.endSeconds) {
-        videoRef.current?.seek(snippet.startSeconds);
-      }
-    },
-    [dataUsageTracker, snippet.endSeconds, snippet.startSeconds, isActive, isScreenFocused]
-  );
-
-  const handleError = React.useCallback((error: any) => {
-    console.error(`[PhraseSearch ${snippet.id}] вќЊ Video error:`, error);
-    setHasError(true);
-    setIsReady(false);
-  }, [snippet.id]);
-
-  // Reset state when snippet changes
-  React.useEffect(() => {
-    setIsReady(false);
-    setHasError(false);
-    hasInitializedRef.current = false;
-    hasReportedPlaybackRef.current = false;
-  }, [snippet.id]);
-
-  // Handle active state and screen focus changes
-  React.useEffect(() => {
-    if (isActive && isScreenFocused && isReady) {
-      // Seek to start when becoming active
-      videoRef.current?.seek(snippet.startSeconds);
+      break;
     }
 
-    if (!isActive || !isScreenFocused) {
-      // Reset initialization flag when becoming inactive or screen loses focus
-      hasInitializedRef.current = false;
-    }
-  }, [isActive, isScreenFocused, isReady, snippet.startSeconds]);
-
-  React.useEffect(() => {
-    if (isActive && isScreenFocused && isReady && !hasReportedPlaybackRef.current) {
-      hasReportedPlaybackRef.current = true;
-      onPlaybackReady?.();
-    }
-  }, [isActive, isScreenFocused, isReady, onPlaybackReady]);
-
-  // Cleanup on unmount
-  React.useEffect(() => {
-    return () => {
-      if (loopCheckIntervalRef.current) {
-        clearInterval(loopCheckIntervalRef.current);
-      }
-    };
-  }, []);
-
-  const handlePlayPause = React.useCallback(() => {
-    if (!isReady || !isActive) {
-      return;
-    }
-    // Note: We removed manual play/pause state as it conflicts with paused prop
-    // Video is controlled by isActive prop only
-  }, [isActive, isReady]);
-
-  const toggleEnglish = React.useCallback(() => {
-    setShowEnglish(prev => !prev);
-  }, []);
-
-  const toggleRussian = React.useCallback(() => {
-    setShowRussian(prev => !prev);
-  }, []);
-
-  const highlightedEnglish = React.useMemo(() => {
-    const text = snippet.contextText;
-    const targetPhrase = highlightPhrase || phrase;
-    if (!targetPhrase || !text) return <Text style={styles.subtitleText}>{text}</Text>;
-
-    const normalize = (value: string) =>
-      value
-        .toLowerCase()
-        .replace(/\u2019/g, "'")
-        .replace(/['',]/g, '')
-        .replace(/\s+/g, ' ')
-        .trim();
-
-    const escapeRegex = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-
-      const sanitizedTokens = targetPhrase
-      .trim()
-      .split(/\s+/)
-      .map((token) => normalize(token))
-      .filter((token) => token.length > 0);
-
-    if (!sanitizedTokens.length) {
-      return <Text style={styles.subtitleText}>{text}</Text>;
+    if (match.index > lastIndex) {
+      segments.push(text.slice(lastIndex, match.index));
     }
 
-    const buildTokenPattern = (token: string) => {
-      const chars = token.split('');
-      if (!chars.length) return '';
-      return chars
-        .map((char, index) => {
-          const escaped = escapeRegex(char);
-          return index === chars.length - 1 ? escaped : `${escaped}['',]?`;
-        })
-        .join('');
-    };
-
-    const tokenPatterns = sanitizedTokens
-      .map((token) => buildTokenPattern(token))
-      .filter((pattern) => pattern.length > 0);
-
-    if (!tokenPatterns.length) {
-      return <Text style={styles.subtitleText}>{text}</Text>;
-    }
-
-    const normalizedTarget = sanitizedTokens.join(' ');
-    const pattern = tokenPatterns.join('\\s+');
-    const regex = new RegExp(`(${pattern})`, 'gi');
-    const parts = text.split(regex);
-
-    return (
-      <Text style={styles.subtitleText}>
-        {parts.map((part, index) => {
-          if (!part) return null;
-          const isMatch = normalize(part) === normalizedTarget;
-          return (
-            <Text
-              key={index}
-              style={[
-                styles.subtitleText,
-                isMatch && {
-                  color: '#FFD700',
-                  fontWeight: '700',
-                  backgroundColor: 'rgba(255, 215, 0, 0.2)',
-                },
-              ]}
-            >
-              {part}
-            </Text>
-          );
-        })}
+    segments.push(
+      <Text key={`highlight-${key++}`} style={highlightStyle}>
+        {matchText}
       </Text>
     );
-  }, [snippet.contextText, highlightPhrase, phrase]);
+
+    lastIndex = match.index + matchText.length;
+  }
+
+  if (lastIndex < text.length) {
+    segments.push(text.slice(lastIndex));
+  }
+
+  return segments.length ? segments : text;
+};
+
+const CAROUSEL_WIDTH = SCREEN_WIDTH - 40;
+const VIDEO_WIDTH = CAROUSEL_WIDTH * 0.9;
+const VIDEO_HEIGHT = VIDEO_WIDTH * (16 / 9) + 12;
+const VIDEO_CROP_TOP = 10;
+const VIDEO_CROP_BOTTOM = 40;
+const CROPPED_VIDEO_HEIGHT = VIDEO_HEIGHT - VIDEO_CROP_TOP - VIDEO_CROP_BOTTOM;
+
+const PAGE_SIZE = 2;
+
+const DEFAULT_SNIPPET_CAP = 6;
+
+const PREMIUM_SNIPPET_CAP = 50;
+
+const SNIPPET_PADDING_SECONDS = 1;
+const PREFETCH_THRESHOLD = 1;
+const MAX_DUPLICATE_FETCH_ATTEMPTS = 5;
+
+const CMAF_SEGMENT_DURATION = 4; // seconds
+
+const CMAF_PROFILE_PREFIX = "720p";
+
+const SNIPPET_CACHE_DIR = `${
+  FileSystem.cacheDirectory ?? ""
+}snippet-playlists/`;
+
+const computePaddingSeconds = (phrase: string): number => {
+  const trimmed = phrase.trim();
+  if (!trimmed) {
+    return 2;
+  }
+  const wordCount = trimmed.split(/\s+/).filter(Boolean).length;
+  if (wordCount <= 2) {
+    return 2;
+  }
+  if (wordCount <= 4) {
+    return 2;
+  }
+  return SNIPPET_PADDING_SECONDS;
+};
+
+const formatSegmentIndex = (segmentIndex: number): string =>
+  segmentIndex.toString().padStart(3, "0");
+
+const sanitizeSnippetId = (id: string): string =>
+  id.replace(/[^a-zA-Z0-9_-]/g, "_");
+
+const resolveBaseVideoUrl = (masterUrl: string): string => {
+  try {
+    const parsed = new URL(masterUrl);
+
+    const pathSegments = parsed.pathname.split("/");
+
+    pathSegments.pop(); // remove master.m3u8
+
+    parsed.pathname = `${pathSegments.join("/")}/`;
+
+    parsed.search = "";
+
+    parsed.hash = "";
+
+    return parsed.toString();
+  } catch {
+    if (masterUrl.endsWith("master.m3u8")) {
+      return masterUrl.slice(0, masterUrl.lastIndexOf("/") + 1);
+    }
+
+    return masterUrl;
+  }
+};
+
+let snippetCacheDirReady = false;
+
+const ensureSnippetCacheDir = async () => {
+  if (snippetCacheDirReady) return;
+
+  try {
+    await FileSystem.makeDirectoryAsync(SNIPPET_CACHE_DIR, {
+      intermediates: true,
+    });
+
+    snippetCacheDirReady = true;
+  } catch (error) {
+    console.warn(
+      "[PhraseSearch] Failed to prepare snippet cache directory:",
+      error
+    );
+  }
+};
+
+const buildSnippetPlaylistContent = (snippet: PhraseSnippet) => {
+  const baseUrl = resolveBaseVideoUrl(snippet.videoUrl);
+
+  const safeStart = Math.max(0, snippet.startSeconds);
+
+  const safeEnd = Math.max(safeStart + 0.5, snippet.endSeconds);
+
+  const startSegment = Math.max(
+    0,
+    Math.floor(safeStart / CMAF_SEGMENT_DURATION)
+  );
+
+  const endSegmentExclusive = Math.max(
+    startSegment + 1,
+
+    Math.ceil(safeEnd / CMAF_SEGMENT_DURATION)
+  );
+
+  const lines: string[] = [
+    "#EXTM3U",
+
+    "#EXT-X-VERSION:7",
+
+    `#EXT-X-TARGETDURATION:${CMAF_SEGMENT_DURATION}`,
+
+    "#EXT-X-INDEPENDENT-SEGMENTS",
+
+    `#EXT-X-MAP:URI="${baseUrl}${CMAF_PROFILE_PREFIX}_init.mp4"`,
+  ];
+
+  for (let idx = startSegment; idx < endSegmentExclusive; idx += 1) {
+    lines.push(`#EXTINF:${CMAF_SEGMENT_DURATION.toFixed(1)},`);
+
+    lines.push(
+      `${baseUrl}${CMAF_PROFILE_PREFIX}_${formatSegmentIndex(idx)}.m4s`
+    );
+  }
+
+  lines.push("#EXT-X-ENDLIST");
+
+  return {
+    content: lines.join("\n"),
+
+    startSegment,
+
+    endSegmentExclusive,
+  };
+};
+
+const createSnippetPlaylistFile = async (
+  snippet: PhraseSnippet
+): Promise<string> => {
+  await ensureSnippetCacheDir();
+
+  const { content, startSegment, endSegmentExclusive } =
+    buildSnippetPlaylistContent(snippet);
+
+  const fileName = `${sanitizeSnippetId(
+    snippet.id
+  )}_${startSegment}-${endSegmentExclusive}_${CMAF_PROFILE_PREFIX}.m3u8`;
+
+  const filePath = `${SNIPPET_CACHE_DIR}${fileName}`;
+
+  await FileSystem.writeAsStringAsync(filePath, content, {
+    encoding: FileSystem.EncodingType.UTF8,
+  });
+
+  return filePath;
+};
+
+interface VideoSnippetItemProps {
+  snippet: PhraseSnippet;
+  theme: AppTheme;
+  isActive: boolean;
+  showEnglishSubtitles: boolean;
+  showRussianSubtitles: boolean;
+  onToggleEnglish: () => void;
+  onToggleRussian: () => void;
+  onOpenFullVideo: (snippet: PhraseSnippet) => void;
+  highlightTerm: string;
+}
+
+const VideoSnippetItem: React.FC<VideoSnippetItemProps> = ({
+  snippet,
+  theme,
+  isActive,
+  showEnglishSubtitles,
+  showRussianSubtitles,
+  onToggleEnglish,
+  onToggleRussian,
+  onOpenFullVideo,
+  highlightTerm,
+}) => {
+  const [ready, setReady] = useState(false);
+
+  const [playlistUri, setPlaylistUri] = useState<string | null>(null);
+
+  const [preparingPlaylist, setPreparingPlaylist] = useState(false);
+
+  const [playlistError, setPlaylistError] = useState<string | null>(null);
+
+  const videoRef = useRef<VideoComponentRef>(null);
+
+  const wasActiveRef = useRef(false);
+
+  const [isManuallyPaused, setIsManuallyPaused] = useState(false);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    const preparePlaylist = async () => {
+      setPreparingPlaylist(true);
+
+      setPlaylistError(null);
+
+      setReady(false);
+
+      try {
+        const fileUri = await createSnippetPlaylistFile(snippet);
+
+        if (isMounted) {
+          setPlaylistUri(fileUri);
+        }
+      } catch (error) {
+        console.error(
+          `[PhraseSearch] Failed to prepare snippet playlist (${snippet.id})`,
+          error
+        );
+
+        if (isMounted) {
+          setPlaylistError("Не удалось подготовить видео");
+
+          setPlaylistUri(null);
+        }
+      } finally {
+        if (isMounted) {
+          setPreparingPlaylist(false);
+        }
+      }
+    };
+
+    preparePlaylist();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [snippet.id, snippet.startSeconds, snippet.endSeconds, snippet.videoUrl]);
+
+  useEffect(() => {
+    setReady(false);
+
+    wasActiveRef.current = false;
+
+    setIsManuallyPaused(false);
+  }, [playlistUri]);
+
+  useEffect(() => {
+    if (ready && isActive && !wasActiveRef.current) {
+      videoRef.current?.seek(0);
+    }
+
+    wasActiveRef.current = isActive;
+  }, [isActive, ready]);
+
+  useEffect(() => {
+    if (!isActive) {
+      setIsManuallyPaused(false);
+    }
+  }, [isActive]);
+
+  const paused = !isActive || !ready || isManuallyPaused;
 
   return (
-    <View style={styles.videoCard}>
+    <View style={styles.snippetCard}>
       <View style={styles.videoWrapper}>
-        <Pressable onPress={handlePlayPause} style={styles.videoContainer}>
-          {isActive && isScreenFocused ? (
+        <View style={styles.subtitleToggleRow}>
+          <Pressable
+            style={[
+              styles.subtitleToggleButton,
+              showEnglishSubtitles
+                ? {
+                    backgroundColor: theme.colors.primary,
+                    borderColor: theme.colors.primary,
+                  }
+                : styles.subtitleToggleButtonInactive,
+            ]}
+            onPress={onToggleEnglish}
+          >
+            <Text style={styles.subtitleToggleLabel}>EN</Text>
+          </Pressable>
+          <Pressable
+            style={[
+              styles.subtitleToggleButton,
+              showRussianSubtitles
+                ? {
+                    backgroundColor: theme.colors.primary,
+                    borderColor: theme.colors.primary,
+                  }
+                : styles.subtitleToggleButtonInactive,
+            ]}
+            onPress={onToggleRussian}
+          >
+            <Text style={styles.subtitleToggleLabel}>RU</Text>
+          </Pressable>
+        </View>
+        <Pressable
+          style={styles.openVideoButton}
+          onPress={() => onOpenFullVideo(snippet)}
+        >
+          <Text style={styles.openVideoLabel}>Full video</Text>
+          <Ionicons name="open-outline" size={16} color="#fff" />
+        </Pressable>
+        {playlistUri ? (
+          <>
             <Video
               ref={videoRef}
-              source={videoSource}
+              source={{ uri: playlistUri, type: "m3u8" as const }}
               style={styles.video}
               resizeMode="cover"
-              repeat={false}
-              paused={false}
-              volume={1}
-              muted={false}
-              playInBackground={false}
-              playWhenInactive={false}
-              preventsDisplaySleepDuringVideoPlayback={true}
-              maxBitRate={2000000}
-              bufferConfig={bufferConfig}
-              onLoad={handleLoad}
-              onProgress={handleProgress}
-              onBandwidthUpdate={dataUsageTracker.handleBandwidthUpdate}
-              onError={handleError}
-              progressUpdateInterval={250}
-              ignoreSilentSwitch="ignore"
+              paused={paused}
+              repeat
+              onLoad={() => setReady(true)}
+              onError={(error) => {
+                console.error(
+                  `[PhraseSearch] Snippet playback error (${snippet.id})`,
+                  error
+                );
+
+                setPlaylistError("Не удалось воспроизвести видео");
+
+                setReady(false);
+              }}
             />
-          ) : (
-            <View style={[styles.video, { backgroundColor: '#000' }]} />
-          )}
 
-          {/* Subtitle controls */}
-          <View style={styles.subtitleControls}>
-            <Pressable
-              style={[
-                styles.subtitleButton,
-                { backgroundColor: showEnglish ? 'rgba(255, 255, 255, 0.9)' : 'rgba(128, 128, 128, 0.6)' },
-              ]}
-              onPress={toggleEnglish}
-            >
-              <Text style={[styles.subtitleButtonText, { color: showEnglish ? '#000' : '#FFF' }]}>
-                EN
-              </Text>
-            </Pressable>
-            <Pressable
-              style={[
-                styles.subtitleButton,
-                { backgroundColor: showRussian ? 'rgba(255, 255, 255, 0.9)' : 'rgba(128, 128, 128, 0.6)' },
-              ]}
-              onPress={toggleRussian}
-            >
-              <Text style={[styles.subtitleButtonText, { color: showRussian ? '#000' : '#FFF' }]}>
-                RU
-              </Text>
-            </Pressable>
-          </View>
+            {!ready && (
+              <View style={styles.loadingOverlay}>
+                <ActivityIndicator size="large" color="#fff" />
+              </View>
+            )}
 
-          {(snippet.contextText || snippet.translationContextText) && (
-            <View style={styles.subtitleOverlay}>
-              {snippet.contextText && showEnglish ? (
-                <View style={styles.subtitleEnglishBox}>{highlightedEnglish}</View>
-              ) : null}
-              {snippet.translationContextText && showRussian ? (
-                <View style={styles.subtitleRussianBox}>
-                  <Text style={styles.subtitleTranslationText}>{snippet.translationContextText}</Text>
+            <Pressable
+              style={styles.videoTouchArea}
+              onPress={() => {
+                if (ready && isActive) {
+                  setIsManuallyPaused((prev) => !prev);
+                }
+              }}
+            >
+              {paused && ready && (
+                <View style={styles.playIcon}>
+                  <Ionicons
+                    name="play-circle"
+                    size={64}
+                    color="rgba(255,255,255,0.9)"
+                  />
                 </View>
-              ) : null}
-            </View>
-          )}
+              )}
+            </Pressable>
 
-          {isActive && isScreenFocused && !isReady && !hasError && (
-            <View style={styles.loadingOverlay}>
-              <ActivityIndicator size="large" color="#FFFFFF" />
-            </View>
-          )}
+            {((showEnglishSubtitles && snippet.contextText) ||
+              (showRussianSubtitles && snippet.translationContextText)) &&
+              ready && (
+                <View style={styles.subtitles}>
+                  {showEnglishSubtitles && snippet.contextText && (
+                    <View style={styles.subtitleBubble}>
+                      <Text style={styles.subtitleText}>
+                        {buildHighlightedChildren(
+                          snippet.contextText,
+                          highlightTerm,
+                          styles.subtitleHighlight
+                        )}
+                      </Text>
+                    </View>
+                  )}
+                  {showRussianSubtitles && snippet.translationContextText && (
+                    <View
+                      style={[styles.subtitleBubble, styles.subtitleBubbleRu]}
+                    >
+                      <Text style={styles.subtitleTranslation}>
+                        {snippet.translationContextText}
+                      </Text>
+                    </View>
+                  )}
+                </View>
+              )}
+          </>
+        ) : (
+          <View style={[styles.video, styles.videoPlaceholder]}>
+            {preparingPlaylist ? (
+              <>
+                <ActivityIndicator size="large" color="#fff" />
 
-          {hasError && (
-            <View style={styles.errorOverlay}>
-              <Ionicons name="alert-circle-outline" size={48} color="#FF6B6B" />
-              <Text style={styles.errorText}>Не удалось загрузить видео</Text>
-              <Text style={styles.errorSubtext}>Проверьте подключение к сети</Text>
-            </View>
-          )}
-        </Pressable>
+                <Text style={styles.placeholderText}>Готовим отрывок…</Text>
+              </>
+            ) : playlistError ? (
+              <Text style={styles.placeholderText}>{playlistError}</Text>
+            ) : null}
+          </View>
+        )}
       </View>
     </View>
   );
-}, (prevProps, nextProps) => {
-  // Only re-render if these specific props change
-  return (
-    prevProps.snippet.id === nextProps.snippet.id &&
-      prevProps.isActive === nextProps.isActive &&
-      prevProps.phrase === nextProps.phrase &&
-      prevProps.highlightPhrase === nextProps.highlightPhrase &&
-      prevProps.isScreenFocused === nextProps.isScreenFocused &&
-      prevProps.onPlaybackReady === nextProps.onPlaybackReady
-  );
-});
-
-VideoCard.displayName = 'VideoCard';
-
-interface CarouselIndicatorProps {
-  total: number;
-  activeIndex: number;
-  activeIndexShared: Animated.SharedValue<number>;
-  theme: AppTheme;
-}
-
-const DotIndicator = ({
-  index,
-  activeIndexShared,
-  theme
-}: {
-  index: number;
-  activeIndexShared: Animated.SharedValue<number>;
-  theme: AppTheme;
-}) => {
-  const animatedStyle = useAnimatedStyle(() => {
-    const distance = Math.abs(activeIndexShared.value - index);
-    const isActive = distance < 0.5;
-    const targetWidth = isActive ? 24 : 8;
-
-    return {
-      width: withTiming(targetWidth, {
-        duration: 200,
-        easing: Easing.out(Easing.ease),
-      }),
-      backgroundColor: isActive ? theme.colors.primary : theme.colors.border,
-    };
-  });
-
-  return <Animated.View style={[styles.indicatorDot, animatedStyle]} />;
 };
-
-const CarouselIndicator = React.memo(({ total, activeIndexShared, theme }: CarouselIndicatorProps) => {
-  if (total <= 1) return null;
-
-  return (
-    <View style={styles.indicatorContainer}>
-      {Array.from({ length: total }).map((_, index) => (
-        <DotIndicator key={index} index={index} activeIndexShared={activeIndexShared} theme={theme} />
-      ))}
-    </View>
-  );
-});
-
-CarouselIndicator.displayName = 'CarouselIndicator';
 
 export const PhraseSearch = () => {
   const theme = useTheme() as AppTheme;
-  const userId = useAppSelector((state) => state.user.profile?.id ?? null);
 
-  const [phrase, setPhrase] = useState('');
+  const profile = useAppSelector((state) => state.user.profile);
+
+  const [phrase, setPhrase] = useState("");
+
   const [snippets, setSnippets] = useState<PhraseSnippet[]>([]);
+  const [searchTranslation, setSearchTranslation] = useState<string | null>(
+    null
+  );
+  const [highlightTerm, setHighlightTerm] = useState("");
+  const [showEnglishSubtitles, setShowEnglishSubtitles] = useState(true);
+  const [showRussianSubtitles, setShowRussianSubtitles] = useState(true);
+
   const [loading, setLoading] = useState(false);
+
   const [error, setError] = useState<string | null>(null);
-  const [activeIndex, setActiveIndex] = useState(0);
+
   const [isScreenFocused, setIsScreenFocused] = useState(true);
-  const [translation, setTranslation] = useState<string>('');
-  const [snippetTranslations, setSnippetTranslations] = useState<string[]>([]);
-  const [noVideoFound, setNoVideoFound] = useState(false);
-  const [detectedLang, setDetectedLang] = useState<'en' | 'ru' | 'unknown'>('unknown');
-  const [searchTimestamp, setSearchTimestamp] = useState<number | null>(null);
-  const [playbackLatencyMs, setPlaybackLatencyMs] = useState<number | null>(null);
 
-  const carouselRef = useRef<any>(null);
-  const activeIndexShared = useSharedValue(0);
+  const [activeIndex, setActiveIndex] = useState(0);
+
+  const [totalSnippets, setTotalSnippets] = useState(0);
+
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
+
+  const [hasMore, setHasMore] = useState(false);
+
+  const [isFetchingMore, setIsFetchingMore] = useState(false);
+  const snippetsLengthRef = useRef(0);
+
+  const activePhraseRef = useRef("");
+
   const abortControllerRef = useRef<AbortController | null>(null);
-  const playbackReportedRef = useRef(false);
-  const currentSearchTokenRef = useRef<symbol | null>(null);
 
-  const handleClear = useCallback(() => {
-    setPhrase('');
-    setSnippets([]);
-    setSnippetTranslations([]);
-    setTranslation('');
-    setNoVideoFound(false);
-    setError(null);
-    setDetectedLang('unknown');
-    if (abortControllerRef.current) {
-      abortControllerRef.current.abort();
-      abortControllerRef.current = null;
-    }
-    setSearchTimestamp(null);
-    setPlaybackLatencyMs(null);
-    playbackReportedRef.current = false;
-    currentSearchTokenRef.current = null;
-    // Clear translation cache to remove incorrect translations
-    clearTranslationCache();
-    searchCache.clear();
-  }, []);
+  const loadedSnippetIdsRef = useRef<Set<string>>(new Set());
+  const translationRequestIdRef = useRef(0);
 
-  const handleSnippetPlaybackReady = useCallback(() => {
-    if (playbackReportedRef.current || searchTimestamp == null) {
-      return;
-    }
-    playbackReportedRef.current = true;
-    setPlaybackLatencyMs(Date.now() - searchTimestamp);
-    setSearchTimestamp(null);
-  }, [searchTimestamp]);
+  const snippetQuota =
+    profile?.role === UserRole.Admin
+      ? PREMIUM_SNIPPET_CAP
+      : DEFAULT_SNIPPET_CAP;
 
-  // Handle screen focus/blur to pause videos when switching tabs
   useFocusEffect(
     useCallback(() => {
       setIsScreenFocused(true);
-      return () => {
-        setIsScreenFocused(false);
-      };
+
+      return () => setIsScreenFocused(false);
     }, [])
   );
 
-  // Auto-calculate padding based on phrase word count
-  const calculatePadding = useCallback((phraseText: string): number => {
-    const wordCount = phraseText.trim().split(/\s+/).filter(w => w.length > 0).length;
+  useEffect(() => {
+    snippetsLengthRef.current = snippets.length;
+  }, [snippets.length]);
 
-    if (wordCount <= 2) {
-      return 3; // 1-2 words: 3 seconds
-    } else if (wordCount <= 4) {
-      return 2; // 3-4 words: 2 seconds
-    } else {
-      return 1; // 5+ words: 1 second
-    }
+  const resetSearchState = useCallback(() => {
+    setSnippets([]);
+
+    setActiveIndex(0);
+
+    setTotalSnippets(0);
+
+    setNextCursor(null);
+
+    setHasMore(false);
+
+    activePhraseRef.current = "";
+
+    loadedSnippetIdsRef.current.clear();
+    snippetsLengthRef.current = 0;
+    translationRequestIdRef.current += 1;
+    setSearchTranslation(null);
+    setHighlightTerm("");
   }, []);
 
-  const performSearch = useCallback(async (searchPhrase?: string) => {
-    const currentPhrase = searchPhrase ?? phrase;
-    if (typeof currentPhrase !== 'string') {
-      return;
-    }
-    const trimmed = currentPhrase.trim();
-    if (!trimmed) {
-      setError('Введите фразу для поиска');
-      return;
-    }
+  const requestSnippets = useCallback(
+    async ({
+      searchValue,
 
-    // Detect language
-    const lang = detectLanguage(trimmed);
-    setDetectedLang(lang);
+      cursor,
 
-    // Cancel previous request
-    if (abortControllerRef.current) {
-      abortControllerRef.current.abort();
-    }
+      mode,
+    }: {
+      searchValue: string;
 
-    // Create new AbortController for this request and keep a stable reference
-    const abortController = new AbortController();
-    abortControllerRef.current = abortController;
-    const searchToken = Symbol('search');
-    currentSearchTokenRef.current = searchToken;
-    const isLatestSearch = () => currentSearchTokenRef.current === searchToken;
+      cursor?: string | null;
+
+      mode: "initial" | "append";
+    }) => {
+      if (mode === "append") {
+        setIsFetchingMore(true);
+      }
+
+      console.log("[PhraseSearch] request start", { mode, cursor });
+
+      const controller = new AbortController();
+
+      abortControllerRef.current?.abort();
+
+      abortControllerRef.current = controller;
+
+      try {
+        let cursorToUse: string | null | undefined = cursor;
+        let duplicateAttempts = 0;
+
+        while (true) {
+          console.log("[PhraseSearch] fetch page", {
+            mode,
+            cursor: cursorToUse,
+            duplicateAttempts,
+          });
+
+          const response = await videoLearningApi.searchPhrase({
+            phrase: searchValue,
+
+            limit: PAGE_SIZE,
+
+            cursor: cursorToUse ?? undefined,
+
+            paddingSeconds: computePaddingSeconds(searchValue),
+
+            userId: profile?.id,
+
+            maxSnippets: snippetQuota,
+
+            signal: controller.signal,
+          });
+
+          const applyMetadata = (resp: PhraseSearchResponse) => {
+            setTotalSnippets(resp.total);
+
+            setHasMore(resp.hasMore);
+
+            setNextCursor(resp.nextCursor);
+
+            setError(null);
+          };
+
+          if (mode === "initial") {
+            loadedSnippetIdsRef.current = new Set(
+              response.items.map((item) => item.id)
+            );
+
+            setSnippets(response.items);
+            snippetsLengthRef.current = response.items.length;
+
+            setActiveIndex(0);
+
+            activePhraseRef.current = searchValue;
+
+            applyMetadata(response);
+
+            break;
+          } else {
+            const freshItems = response.items.filter(
+              (item) => !loadedSnippetIdsRef.current.has(item.id)
+            );
+
+            if (!freshItems.length) {
+              applyMetadata(response);
+
+              if (
+                response.hasMore &&
+                response.nextCursor &&
+                duplicateAttempts < MAX_DUPLICATE_FETCH_ATTEMPTS
+              ) {
+                cursorToUse = response.nextCursor;
+
+                duplicateAttempts += 1;
+
+                console.log("[PhraseSearch] duplicate page, retrying", {
+                  mode,
+                  nextCursor: cursorToUse,
+                  duplicateAttempts,
+                });
+
+                continue;
+              }
+
+              return;
+            }
+
+            freshItems.forEach((item) =>
+              loadedSnippetIdsRef.current.add(item.id)
+            );
+
+            setSnippets((prev) => {
+              const next = [...prev, ...freshItems];
+              snippetsLengthRef.current = next.length;
+              return next;
+            });
+
+            applyMetadata(response);
+
+            console.log("[PhraseSearch] appended fresh items", {
+              mode,
+              added: freshItems.length,
+              totalLoaded: snippetsLengthRef.current,
+            });
+
+            break;
+          }
+        }
+
+        console.log("[PhraseSearch] request completed", { mode });
+      } catch (err: any) {
+        if (err?.name === "AbortError") return;
+
+        console.error("[PhraseSearch] Search failed:", err);
+
+        setError("Search failed. Please try again.");
+
+        if (mode === "initial") {
+          resetSearchState();
+        }
+      } finally {
+        if (mode === "append") {
+          setIsFetchingMore(false);
+        } else {
+          setLoading(false);
+        }
+      }
+    },
+
+    [profile?.id, snippetQuota, resetSearchState]
+  );
+  const prefetchNextSnippet = useCallback(
+    (referenceIndex?: number) => {
+      if (
+        !hasMore ||
+        !nextCursor ||
+        !activePhraseRef.current ||
+        isFetchingMore ||
+        loading
+      ) {
+        return;
+      }
+      const baselineIndex =
+        typeof referenceIndex === "number" && referenceIndex >= 0
+          ? referenceIndex
+          : activeIndex;
+      const totalLoaded = snippetsLengthRef.current;
+      if (totalLoaded === 0) {
+        return;
+      }
+      const remainingAhead = totalLoaded - baselineIndex - 1;
+      if (remainingAhead >= PREFETCH_THRESHOLD) {
+        return;
+      }
+      console.log("[PhraseSearch] prefetch enqueue", {
+        baselineIndex,
+        totalLoaded,
+        nextCursor,
+      });
+      requestSnippets({
+        searchValue: activePhraseRef.current,
+        cursor: nextCursor,
+        mode: "append",
+      });
+    },
+    [activeIndex, hasMore, isFetchingMore, loading, nextCursor, requestSnippets]
+  );
+  const handleClear = useCallback(() => {
+    abortControllerRef.current?.abort();
+    setPhrase("");
+    setError(null);
+    resetSearchState();
+    setLoading(false);
+    setIsFetchingMore(false);
+  }, [resetSearchState]);
+
+  const performSearch = useCallback(async () => {
+    const trimmed = phrase.trim();
+
+    if (!trimmed) return;
+
+    setError(null);
+
+    resetSearchState();
 
     setLoading(true);
-    setError(null);
-    setTranslation('');
-    setSnippetTranslations([]);
-    setNoVideoFound(false);
-    setSearchTimestamp(Date.now());
-    setPlaybackLatencyMs(null);
-    playbackReportedRef.current = false;
+    setSearchTranslation(null);
+    translationRequestIdRef.current += 1;
+    const translationRequestId = translationRequestIdRef.current;
 
     try {
-      if (lang === 'ru') {
-        // OPTIMIZATION: Start translation immediately without await
-        const translationPromise = getTranslationVariants(trimmed, 'ru', 'en', MAX_TRANSLATION_VARIANTS);
+      const detectedLang = detectLanguage(trimmed);
 
-        // Wait for translation to complete
-        const variants = await translationPromise;
-        const uniqueVariants = Array.from(
-          new Set(
-            variants
-              .map((variant) => variant.trim())
-              .filter((variant) => variant.length > 0)
-          )
-        ).slice(0, MAX_TRANSLATION_VARIANTS);
+      let searchPhrase = trimmed;
+      let highlightValue = "";
 
-        if (uniqueVariants.length === 0) {
-          setSnippets([]);
-          setSnippetTranslations([]);
-          setTranslation('');
-          setActiveIndex(0);
-          activeIndexShared.value = 0;
-          setNoVideoFound(true);
-          setSearchTimestamp(null);
-          setPlaybackLatencyMs(null);
-          playbackReportedRef.current = false;
-          return;
-        }
-
-        // OPTIMIZATION: Prepare search requests while translation is still in cache
-        const variantMeta = uniqueVariants.map((variant) => {
-          const paddingSeconds = calculatePadding(variant);
-          return {
-            variant,
-            paddingSeconds,
-            cacheKey: getCacheKey(variant, VARIANT_SNIPPET_LIMIT, paddingSeconds),
-          };
-        });
-
-        // OPTIMIZATION: Check cache synchronously first
-        const snippetIds = new Set<string>();
-        const matchedSnippets: PhraseSnippet[] = [];
-        const matchedTranslations: string[] = [];
-        const pendingVariants: typeof variantMeta = [];
-
-        variantMeta.forEach((meta) => {
-          const cachedResult = getFromCache(meta.cacheKey);
-          if (cachedResult && cachedResult.items.length > 0) {
-            const snippet = cachedResult.items[0];
-            if (snippet && !snippetIds.has(snippet.id)) {
-              snippetIds.add(snippet.id);
-              matchedSnippets.push(snippet);
-              matchedTranslations.push(meta.variant);
-            }
-          } else {
-            pendingVariants.push(meta);
-          }
-        });
-
-        // If we have cached results, show them immediately
-        if (matchedSnippets.length > 0 && pendingVariants.length === 0) {
-          setSnippets(matchedSnippets);
-          setSnippetTranslations(matchedTranslations);
-          setLoading(false);
-          setTranslation('');
-          setActiveIndex(0);
-          activeIndexShared.value = 0;
-          setNoVideoFound(false);
-          return;
-        }
-
-        // OPTIMIZATION: Fetch all variants in parallel
-        if (pendingVariants.length > 0) {
-          const variantResults: VariantSnippetResult[] = await Promise.all(
-            pendingVariants.map(async ({ variant, paddingSeconds, cacheKey }) => {
-              try {
-                const response = await videoLearningApi.searchPhrase(
-                  variant,
-                  VARIANT_SNIPPET_LIMIT,
-                  userId ?? undefined,
-                  paddingSeconds,
-                  abortController.signal,
-                );
-
-                setInCache(cacheKey, response);
-                return {
-                  variant,
-                  snippet: response.items[0] ?? null,
-                };
-              } catch (variantError) {
-                if (variantError instanceof Error && variantError.name === 'AbortError') {
-                  throw variantError;
-                }
-                console.warn(`[PhraseSearch] Search failed for "${variant}":`, variantError);
-                return { variant, snippet: null };
-              }
-            })
-          );
-
-          // Add new results to existing cached results
-          variantResults.forEach(({ variant, snippet }) => {
-            if (snippet && !snippetIds.has(snippet.id) && isLatestSearch()) {
-              snippetIds.add(snippet.id);
-              matchedSnippets.push(snippet);
-              matchedTranslations.push(variant);
-            }
-          });
-        }
-
-        if (matchedSnippets.length > 0) {
-          if (isLatestSearch()) {
-            setSnippets(matchedSnippets);
-            setSnippetTranslations(matchedTranslations);
-            setLoading(false);
-          }
-          setTranslation('');
-          setActiveIndex(0);
-          activeIndexShared.value = 0;
-          setNoVideoFound(false);
-        } else {
-          setSnippets([]);
-          setSnippetTranslations([]);
-          setTranslation(uniqueVariants[0]);
-          setActiveIndex(0);
-          activeIndexShared.value = 0;
-          setNoVideoFound(true);
-          setSearchTimestamp(null);
-          setPlaybackLatencyMs(null);
-          playbackReportedRef.current = false;
-        }
-        return;
-      }
-
-      let searchQueries: string[] = [trimmed];
-      let translatedText = '';
-
-      if (lang === 'en') {
-        translatedText = await translateEnToRu(trimmed);
-      }
-
-      setTranslation(translatedText);
-
-      const limit = DEFAULT_LIMIT;
-
-      // Try searching with each query variant until we get results
-      let allSnippets: PhraseSnippet[] = [];
-      const snippetIds = new Set<string>(); // Track unique snippets
-
-      for (const searchQuery of searchQueries) {
-        const paddingSeconds = calculatePadding(searchQuery);
-
-        // Check cache first
-        const cacheKey = getCacheKey(searchQuery, limit, paddingSeconds);
-        const cachedResult = getFromCache(cacheKey);
-
-        if (cachedResult) {
-          // Add unique snippets from cache
-          cachedResult.items.forEach(snippet => {
-            if (!snippetIds.has(snippet.id)) {
-              snippetIds.add(snippet.id);
-              allSnippets.push(snippet);
-            }
-          });
-
-          // If we have enough results from cache, stop searching
-          if (allSnippets.length >= limit) {
-            break;
-          }
-          continue;
-        }
-
+      if (detectedLang === "ru") {
         try {
-          const response: PhraseSearchResponse = await videoLearningApi.searchPhrase(
-            searchQuery,
-            limit,
-            userId ?? undefined,
-            paddingSeconds,
-            abortController.signal,
+          const translated = await translateRuToEn(trimmed);
+          searchPhrase = translated;
+          highlightValue = translated;
+          if (translationRequestIdRef.current === translationRequestId) {
+            setSearchTranslation(translated);
+          }
+        } catch (translationError) {
+          console.warn(
+            "[PhraseSearch] Failed to translate Russian query:",
+            translationError
           );
-
-          // Store in cache
-          setInCache(cacheKey, response);
-
-          // Add unique snippets
-          response.items.forEach(snippet => {
-            if (!snippetIds.has(snippet.id)) {
-              snippetIds.add(snippet.id);
-              allSnippets.push(snippet);
+          if (translationRequestIdRef.current === translationRequestId) {
+            setSearchTranslation(null);
+          }
+          highlightValue = "";
+        }
+      } else {
+        highlightValue = trimmed;
+        translateEnToRu(trimmed)
+          .then((translated) => {
+            if (translationRequestIdRef.current === translationRequestId) {
+              setSearchTranslation(translated);
+            }
+          })
+          .catch((translationError) => {
+            console.warn(
+              "[PhraseSearch] Failed to translate query:",
+              translationError
+            );
+            if (translationRequestIdRef.current === translationRequestId) {
+              setSearchTranslation(null);
             }
           });
-
-          // If we got results, we can stop trying other variants
-          // (or continue to get more diverse results - depends on preference)
-          if (response.items.length > 0) {
-            break;
-          }
-        } catch (err) {
-          // Continue with next variant if this one failed
-          console.warn(`[PhraseSearch] Search failed for "${searchQuery}":`, err);
-          continue;
-        }
       }
 
-      // Set results
-      const limitedSnippets = allSnippets.slice(0, limit);
-      setSnippets(limitedSnippets);
-      setSnippetTranslations([]);
-      setActiveIndex(0);
-      activeIndexShared.value = 0;
-      setNoVideoFound(limitedSnippets.length === 0);
-      if (limitedSnippets.length === 0) {
-        setSearchTimestamp(null);
-        setPlaybackLatencyMs(null);
-        playbackReportedRef.current = false;
-      }
-    } catch (err) {
-      // Ignore aborted requests
-      if (err instanceof Error && err.name === 'AbortError') {
-        return;
-      }
-      const message = err instanceof Error ? err.message : 'РќРµ СѓРґР°Р»РѕСЃСЊ РІС‹РїРѕР»РЅРёС‚СЊ РїРѕРёСЃРє';
-      setError(message);
-      setSnippets([]);
-      setTranslation('');
-      setSnippetTranslations([]);
-      setNoVideoFound(false);
-      setSearchTimestamp(null);
-      setPlaybackLatencyMs(null);
-      playbackReportedRef.current = false;
-    } finally {
+      setHighlightTerm(highlightValue.trim());
+
+      await requestSnippets({
+        searchValue: searchPhrase,
+
+        cursor: null,
+
+        mode: "initial",
+      });
+      prefetchNextSnippet(0);
+    } catch (err: any) {
+      if (err?.name === "AbortError") return;
+
+      console.error("[PhraseSearch] Search failed:", err);
+
+      setError("Search failed. Please try again.");
+
       setLoading(false);
-      abortControllerRef.current = null;
+
+      resetSearchState();
     }
-  }, [phrase, userId, activeIndexShared, calculatePadding]);
+  }, [phrase, requestSnippets, resetSearchState, prefetchNextSnippet]);
 
-  // Debounced search on phrase change
-  useEffect(() => {
-    if (!phrase.trim()) {
-      setSnippets([]);
-      setSnippetTranslations([]);
-      setTranslation('');
-      setNoVideoFound(false);
-      setError(null);
-      setSearchTimestamp(null);
-      setPlaybackLatencyMs(null);
-      playbackReportedRef.current = false;
-      return;
-    }
+  const handleSnapToItem = useCallback(
+    (index: number) => {
+      setActiveIndex(index);
+      prefetchNextSnippet(index);
+    },
+    [prefetchNextSnippet]
+  );
 
-  }, [phrase]);
-
-  // Cleanup on unmount
   useEffect(() => {
     return () => {
-      if (abortControllerRef.current) {
-        abortControllerRef.current.abort();
-      }
+      abortControllerRef.current?.abort();
     };
   }, []);
 
-  const hasPerSnippetTranslations = snippetTranslations.length > 0;
-  const activeTranslationText = hasPerSnippetTranslations
-    ? snippetTranslations[Math.min(activeIndex, snippetTranslations.length - 1)] ?? ''
-    : translation;
-  const shouldShowTranslationBox = Boolean(activeTranslationText);
+  const toggleEnglishSubtitles = useCallback(() => {
+    setShowEnglishSubtitles((prev) => !prev);
+  }, []);
+
+  const toggleRussianSubtitles = useCallback(() => {
+    setShowRussianSubtitles((prev) => !prev);
+  }, []);
+
+  const handleOpenFullVideo = useCallback((snippet: PhraseSnippet) => {
+    if (!snippet?.contentId) return;
+
+    router.push({
+      pathname: "/(tabs)/video-learning",
+      params: {
+        contentId: snippet.contentId,
+        focusToken: Date.now().toString(),
+      },
+    });
+  }, []);
 
   return (
-    <View style={[styles.container, { backgroundColor: theme.colors.background }]}>
+    <View
+      style={[styles.container, { backgroundColor: theme.colors.background }]}
+    >
       <View
         style={[
           styles.searchForm,
@@ -810,35 +909,35 @@ export const PhraseSearch = () => {
           },
         ]}
       >
-        {/* РџРѕРёСЃРєРѕРІР°СЏ СЃС‚СЂРѕРєР° СЃ РєРЅРѕРїРєРѕР№ */}
         <View style={styles.searchRow}>
           <View
             style={[
               styles.searchInputWrapper,
-              { borderColor: theme.colors.border, backgroundColor: theme.colors.background },
+              {
+                borderColor: theme.colors.border,
+                backgroundColor: theme.colors.background,
+              },
             ]}
           >
             <TextInput
-              style={[
-                styles.searchInput,
-                {
-                  color: theme.colors.text,
-                },
-              ]}
-              placeholder="Введите слово или фразу..."
+              style={[styles.searchInput, { color: theme.colors.text }]}
+              placeholder="Enter a word or phrase..."
               placeholderTextColor={theme.colors.textSecondary}
               value={phrase}
               onChangeText={setPhrase}
               autoCapitalize="none"
               autoCorrect={false}
               returnKeyType="search"
-              onSubmitEditing={() => {
-                void performSearch();
-              }}
+              onSubmitEditing={performSearch}
             />
+
             {phrase.length > 0 && (
-              <Pressable style={styles.clearButton} onPress={handleClear} hitSlop={10}>
-                <Ionicons name="close-circle" size={18} color={theme.colors.textSecondary} />
+              <Pressable style={styles.clearButton} onPress={handleClear}>
+                <Ionicons
+                  name="close-circle"
+                  size={18}
+                  color={theme.colors.textSecondary}
+                />
               </Pressable>
             )}
           </View>
@@ -847,13 +946,9 @@ export const PhraseSearch = () => {
             style={[
               styles.searchButton,
               { backgroundColor: theme.colors.primary },
-              loading && styles.searchButtonDisabled,
             ]}
-            onPress={() => {
-              void performSearch();
-            }}
+            onPress={performSearch}
             disabled={loading}
-            hitSlop={8}
           >
             {loading ? (
               <ActivityIndicator size="small" color="#FFFFFF" />
@@ -864,33 +959,29 @@ export const PhraseSearch = () => {
         </View>
       </View>
 
-      {error && <Text style={[styles.errorMessage, { color: theme.colors.danger }]}>{error}</Text>}
-
-      {/* Translation display */}
-      {shouldShowTranslationBox && (
+      {searchTranslation && (
         <View
           style={[
-            styles.translationBox,
-            { backgroundColor: theme.colors.surface, borderColor: theme.colors.border },
+            styles.translationBadge,
+            {
+              backgroundColor: theme.colors.surface,
+            },
           ]}
         >
           <Text
-            numberOfLines={2}
-            ellipsizeMode="tail"
-            style={[styles.translationText, { color: theme.colors.text }]}
+            style={[
+              styles.translationText,
+              { color: theme.colors.textSecondary },
+            ]}
           >
-            {activeTranslationText}
+            {searchTranslation}
           </Text>
         </View>
       )}
-      {playbackLatencyMs !== null && (
-        <Text style={[styles.latencyText, { color: theme.colors.textSecondary }]}>
-          Видео стартовало через {(playbackLatencyMs / 1000).toFixed(1)} с
-        </Text>
-      )}
-      {noVideoFound && !loading && (
-        <Text style={[styles.noVideoText, { color: theme.colors.textSecondary }]}>
-          К сожалению, подходящие видео не найдены.
+
+      {error && (
+        <Text style={[styles.errorMessage, { color: theme.colors.danger }]}>
+          {error}
         </Text>
       )}
 
@@ -900,64 +991,51 @@ export const PhraseSearch = () => {
         </View>
       ) : snippets.length === 0 ? (
         <View style={styles.placeholderContainer}>
-          {noVideoFound ? (
-            <Typography variant="body" align="center" style={{ color: theme.colors.textSecondary }}>
-              Попробуйте изменить запрос и выполните поиск ещё раз.
-            </Typography>
-          ) : (
-            <Typography variant="body" align="center" style={{ color: theme.colors.textSecondary }}>
-              Найдите нужную фразу, чтобы увидеть подходящие фрагменты.
-            </Typography>
-          )}
+          <Typography
+            variant="body"
+            align="center"
+            style={{ color: theme.colors.textSecondary }}
+          >
+            Nothing found yet. Try another phrase.
+          </Typography>
         </View>
       ) : (
-        <View style={styles.resultsContainer}>
-          <View style={styles.carouselWrapper}>
-            <Carousel
-              ref={carouselRef}
-              width={SCREEN_WIDTH}
-              height={VIDEO_HEIGHT}
-              data={snippets}
-              renderItem={({ item, index }) => (
-                  <View style={styles.carouselItem}>
-                    <VideoCard
-                      snippet={item}
-                      phrase={phrase}
-                      highlightPhrase={
-                        snippetTranslations[index]
-                          ? snippetTranslations[index]
-                          : detectedLang === 'en'
-                            ? phrase
-                            : undefined
-                      }
-                      theme={theme}
-                      isActive={index === activeIndex}
-                      isScreenFocused={isScreenFocused}
-                      onPlaybackReady={handleSnippetPlaybackReady}
-                    />
-                  </View>
-              )}
-              onProgressChange={(_, absoluteProgress) => {
-                activeIndexShared.value = absoluteProgress;
-              }}
-              onSnapToItem={(index) => {
-                setActiveIndex(index);
-                activeIndexShared.value = index;
-              }}
-              mode="parallax"
-              modeConfig={{
-                parallaxScrollingScale: 0.9,
-                parallaxScrollingOffset: 50,
-              }}
-            />
+        <View style={styles.carouselContainer}>
+          <Carousel
+            loop={false}
+            width={CAROUSEL_WIDTH}
+            height={VIDEO_HEIGHT + 60}
+            data={snippets}
+            renderItem={({ item, index }) => (
+              <View style={styles.carouselItem}>
+                <VideoSnippetItem
+                  snippet={item}
+                  theme={theme}
+                  isActive={index === activeIndex && isScreenFocused}
+                  showEnglishSubtitles={showEnglishSubtitles}
+                  showRussianSubtitles={showRussianSubtitles}
+                  onToggleEnglish={toggleEnglishSubtitles}
+                  onToggleRussian={toggleRussianSubtitles}
+                  onOpenFullVideo={handleOpenFullVideo}
+                  highlightTerm={highlightTerm}
+                />
+              </View>
+            )}
+            onSnapToItem={handleSnapToItem}
+            style={styles.carousel}
+            enabled={snippets.length > 0}
+          />
 
-            <CarouselIndicator
-              total={snippets.length}
-              activeIndex={activeIndex}
-              activeIndexShared={activeIndexShared}
-              theme={theme}
-            />
-          </View>
+          {totalSnippets > 0 && (
+            <Text
+              style={[
+                styles.carouselPager,
+                { color: theme.colors.textSecondary },
+              ]}
+            >
+              {Math.min(activeIndex + 1, totalSnippets)} / {totalSnippets}
+            </Text>
+          )}
         </View>
       )}
     </View>
@@ -967,276 +1045,282 @@ export const PhraseSearch = () => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+
     paddingHorizontal: 20,
+
     paddingTop: 24,
   },
+
   searchForm: {
     marginBottom: 20,
+
     padding: 16,
+
     borderRadius: 16,
+
     borderWidth: 1,
-    shadowColor: '#000',
-    shadowOpacity: 0.08,
-    shadowOffset: { width: 0, height: 6 },
-    shadowRadius: 12,
-    elevation: 3,
   },
+
   searchRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
+    flexDirection: "row",
+
+    gap: 12,
   },
+
   searchInputWrapper: {
     flex: 1,
+
+    flexDirection: "row",
+
+    alignItems: "center",
+
     borderWidth: 1,
+
     borderRadius: 12,
-    paddingHorizontal: 12,
-    minHeight: 48,
-    justifyContent: 'center',
+
+    paddingHorizontal: 14,
+
+    height: 48,
   },
+
   searchInput: {
     flex: 1,
+
     fontSize: 16,
-    paddingVertical: 0,
-    paddingRight: 34,
+
+    fontWeight: "500",
   },
+
   clearButton: {
-    position: 'absolute',
-    right: 10,
-    top: '50%',
-    marginTop: -10,
+    padding: 4,
   },
+
   searchButton: {
-    width: 44,
-    height: 44,
+    width: 48,
+
+    height: 48,
+
     borderRadius: 12,
-    alignItems: 'center',
-    justifyContent: 'center',
+
+    alignItems: "center",
+
+    justifyContent: "center",
   },
-  searchButtonDisabled: {
-    opacity: 0.5,
-  },
+
   errorMessage: {
-    marginBottom: 12,
     fontSize: 14,
-  },
-  translationBox: {
+
+    textAlign: "center",
+
     marginBottom: 16,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    borderRadius: 10,
-    borderWidth: 1,
-    minHeight: 44,
-    justifyContent: 'center',
+  },
+
+  loaderContainer: {
+    flex: 1,
+
+    justifyContent: "center",
+
+    alignItems: "center",
+  },
+
+  placeholderContainer: {
+    flex: 1,
+
+    justifyContent: "center",
+
+    alignItems: "center",
+
+    paddingHorizontal: 40,
+  },
+  translationBadge: {
+    width: CAROUSEL_WIDTH,
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    borderRadius: 12,
+    marginBottom: 6,
   },
   translationText: {
     fontSize: 16,
-    fontWeight: '600',
-    lineHeight: 22,
+    fontWeight: "700",
+    textAlign: "center",
   },
-  latencyText: {
-    marginBottom: 8,
-    fontSize: 13,
-    textAlign: 'center',
+  carouselContainer: {
+    alignItems: "center",
+    marginBottom: -8,
   },
-  noVideoText: {
-    marginBottom: 12,
-    textAlign: 'center',
-    fontSize: 14,
-  },
-  loaderContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  placeholderContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingHorizontal: 24,
-  },
-  scrollView: {
-    flex: 1,
-  },
-  resultsContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  carouselWrapper: {
-    alignItems: 'center',
+  carousel: {
+    flexGrow: 0,
   },
   carouselItem: {
-    justifyContent: 'center',
-    alignItems: 'center',
+    width: CAROUSEL_WIDTH,
+    paddingBottom: 0,
+    alignItems: "center",
   },
-  videoCard: {
-    marginBottom: 0,
-    alignItems: 'center',
+  carouselPager: {
+    position: "absolute",
+    bottom: 60,
+    fontSize: 14,
+    fontWeight: "600",
   },
-  indicatorContainer: {
-    flexDirection: 'row',
-    justifyContent: 'center',
-    alignItems: 'center',
-    gap: 8,
-    marginTop: -8,
-    marginBottom: 20,
+
+  snippetCard: {
+    marginBottom: 12,
+
+    borderRadius: 12,
+
+    overflow: "hidden",
   },
-  indicatorDot: {
-    height: 8,
-    borderRadius: 4,
-  },
+
   videoWrapper: {
-    width: '100%',
-    alignItems: 'center',
-  },
-  videoContainer: {
     width: VIDEO_WIDTH,
-    height: VIDEO_HEIGHT,
-    borderRadius: 20,
-    overflow: 'hidden',
-    backgroundColor: '#000',
-    shadowColor: '#000',
-    shadowOpacity: 0.3,
-    shadowOffset: { width: 0, height: 8 },
-    shadowRadius: 12,
-    elevation: 6,
+
+    height: CROPPED_VIDEO_HEIGHT,
+
+    backgroundColor: "#000",
+
+    borderRadius: 12,
+
+    overflow: "hidden",
+
+    alignSelf: "center",
   },
-  video: {
-    width: '100%',
-    height: '100%',
-  },
-  subtitleControls: {
-    position: 'absolute',
-    top: 16,
-    right: 16,
-    flexDirection: 'row',
+
+  subtitleToggleRow: {
+    position: "absolute",
+    top: 12,
+    left: 12,
+    flexDirection: "row",
     gap: 8,
-    zIndex: 10,
+    zIndex: 2,
+    elevation: 2,
   },
-  subtitleButton: {
-    width: 44,
-    height: 32,
-    borderRadius: 8,
-    alignItems: 'center',
-    justifyContent: 'center',
-    shadowColor: '#000',
-    shadowOpacity: 0.3,
-    shadowOffset: { width: 0, height: 2 },
-    shadowRadius: 4,
-    elevation: 4,
+
+  subtitleToggleButton: {
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 12,
+    borderWidth: 1,
   },
-  subtitleButtonText: {
-    fontSize: 13,
-    fontWeight: '700',
+
+  subtitleToggleButtonInactive: {
+    backgroundColor: "rgba(0,0,0,0.45)",
+    borderColor: "rgba(255,255,255,0.4)",
   },
-  subtitleOverlay: {
-    position: 'absolute',
+
+  subtitleToggleLabel: {
+    color: "#fff",
+    fontSize: 12,
+    fontWeight: "700",
+  },
+
+  openVideoButton: {
+    position: "absolute",
+    top: 12,
+    right: 12,
+    borderRadius: 20,
+    backgroundColor: "rgba(0,0,0,0.7)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.35)",
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    zIndex: 2,
+    elevation: 2,
+  },
+  openVideoLabel: {
+    color: "#fff",
+    fontSize: 12,
+    fontWeight: "700",
+  },
+
+  video: {
+    width: "100%",
+
+    height: VIDEO_HEIGHT,
+    marginTop: -VIDEO_CROP_TOP,
+  },
+
+  videoPlaceholder: {
+    alignItems: "center",
+
+    justifyContent: "center",
+
+    paddingHorizontal: 16,
+  },
+
+  placeholderText: {
+    marginTop: 12,
+
+    color: "#fff",
+
+    fontSize: 14,
+
+    textAlign: "center",
+
+    fontWeight: "500",
+  },
+
+  loadingOverlay: {
+    ...StyleSheet.absoluteFillObject,
+
+    justifyContent: "center",
+
+    alignItems: "center",
+
+    backgroundColor: "#000",
+  },
+
+  videoTouchArea: {
+    ...StyleSheet.absoluteFillObject,
+  },
+
+  playIcon: {
+    ...StyleSheet.absoluteFillObject,
+
+    justifyContent: "center",
+
+    alignItems: "center",
+  },
+
+  subtitles: {
+    position: "absolute",
     bottom: 0,
     left: 0,
     right: 0,
-    paddingHorizontal: 12,
-    paddingBottom: 16,
-    paddingTop: 40,
-    gap: 10,
+    paddingHorizontal: 16,
+    paddingBottom: 18,
+    alignItems: "center",
   },
-  subtitleEnglishBox: {
-    backgroundColor: 'rgba(0, 0, 0, 0.85)',
-    borderRadius: 14,
-    paddingVertical: 12,
-    paddingHorizontal: 18,
-    alignSelf: 'center',
-    maxWidth: '98%',
+
+  subtitleBubble: {
+    width: "100%",
+    borderRadius: 16,
+    backgroundColor: "rgba(0,0,0,0.9)",
+    paddingVertical: 8,
+    paddingHorizontal: 16,
   },
-  subtitleRussianBox: {
-    backgroundColor: 'rgba(0, 0, 0, 0.85)',
-    borderRadius: 14,
-    paddingVertical: 12,
-    paddingHorizontal: 18,
-    alignSelf: 'center',
-    maxWidth: '98%',
-  },
-  subtitleText: {
-    color: '#FFFFFF',
-    fontSize: 18,
-    fontWeight: '600',
-    textAlign: 'center',
-    lineHeight: 24,
-  },
-  subtitleTranslationText: {
-    color: '#FFFFFF',
-    fontSize: 17,
-    fontWeight: '500',
-    textAlign: 'center',
-    lineHeight: 23,
-  },
-  loadingOverlay: {
-    ...StyleSheet.absoluteFillObject,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: 'rgba(0,0,0,0.5)',
-  },
-  errorOverlay: {
-    ...StyleSheet.absoluteFillObject,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: 'rgba(0,0,0,0.8)',
-    padding: 20,
-  },
-  errorText: {
-    color: '#FFFFFF',
-    fontSize: 16,
-    fontWeight: '600',
-    marginTop: 12,
-    textAlign: 'center',
-  },
-  errorSubtext: {
-    color: 'rgba(255, 255, 255, 0.7)',
-    fontSize: 14,
+
+  subtitleBubbleRu: {
+    backgroundColor: "rgba(0,0,0,0.9)",
     marginTop: 8,
-    textAlign: 'center',
   },
-  playOverlay: {
-    ...StyleSheet.absoluteFillObject,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: 'rgba(0, 0, 0, 0.3)',
+
+  subtitleText: {
+    color: "#fff",
+    fontSize: 17,
+    textAlign: "center",
+    fontWeight: "600",
   },
-  playButton: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
-    backgroundColor: 'rgba(255, 255, 255, 0.9)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    shadowColor: '#000',
-    shadowOpacity: 0.3,
-    shadowOffset: { width: 0, height: 4 },
-    shadowRadius: 8,
-    elevation: 8,
+
+  subtitleTranslation: {
+    color: "#e5f4ff",
+    fontSize: 16,
+    textAlign: "center",
+    fontWeight: "600",
   },
-  playButtonText: {
-    fontSize: 32,
-    color: '#000',
-    marginLeft: 4,
-  },
-  playingOverlay: {
-    ...StyleSheet.absoluteFillObject,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: 'rgba(0, 0, 0, 0.1)',
-  },
-  pauseButton: {
-    width: 70,
-    height: 70,
-    borderRadius: 35,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  pauseButtonText: {
-    fontSize: 24,
-    color: '#FFFFFF',
-    fontWeight: '600',
+  subtitleHighlight: {
+    color: "#ffe072",
   },
 });

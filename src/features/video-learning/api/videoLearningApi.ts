@@ -106,6 +106,10 @@ export interface PhraseSearchResponse {
   phrase: string;
   returned: number;
   items: PhraseSnippet[];
+  total: number;
+  hasMore: boolean;
+  nextCursor: string | null;
+  pageSize: number;
 }
 
 export interface SubmitAnswerPayload {
@@ -180,13 +184,23 @@ export const videoLearningApi = {
       headers: buildHeaders(userId, userRole),
     });
   },
-  searchPhrase(
-    phrase: string,
-    limit?: number,
-    userId?: string | null,
-    paddingSeconds?: number,
-    signal?: AbortSignal,
-  ) {
+  searchPhrase({
+    phrase,
+    limit,
+    cursor,
+    paddingSeconds,
+    userId,
+    maxSnippets,
+    signal,
+  }: {
+    phrase: string;
+    limit?: number;
+    cursor?: string | number | null;
+    paddingSeconds?: number;
+    userId?: string | null;
+    maxSnippets?: number;
+    signal?: AbortSignal;
+  }) {
     const params = new URLSearchParams();
     params.append('phrase', phrase);
     if (limit && limit > 0) {
@@ -194,6 +208,12 @@ export const videoLearningApi = {
     }
     if (typeof paddingSeconds === 'number' && paddingSeconds >= 0) {
       params.append('paddingSeconds', Math.floor(paddingSeconds).toString());
+    }
+    if (cursor !== undefined && cursor !== null) {
+      params.append('cursor', cursor.toString());
+    }
+    if (typeof maxSnippets === 'number' && maxSnippets > 0) {
+      params.append('maxSnippets', Math.floor(maxSnippets).toString());
     }
     return apiFetch<PhraseSearchResponse>(`video-learning/search?${params.toString()}`, {
       headers: userId ? buildHeaders(userId) : undefined,

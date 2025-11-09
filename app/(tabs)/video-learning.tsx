@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ActivityIndicator, StyleSheet, TouchableOpacity, View } from "react-native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { useIsFocused, useNavigation } from "@react-navigation/native";
 import { useTheme } from "styled-components/native";
 import { Ionicons } from "@expo/vector-icons";
+import { useLocalSearchParams } from "expo-router";
 
 import { useAppDispatch, useAppSelector } from "@core/store/hooks";
 import { Typography } from "@shared/ui";
@@ -35,6 +36,10 @@ export default function VideoLearningScreen() {
   const dispatch = useAppDispatch();
   const theme = useTheme() as any;
   const navigation = useNavigation();
+  const { contentId: contentIdParam, focusToken } = useLocalSearchParams<{
+    contentId?: string | string[];
+    focusToken?: string | string[];
+  }>();
   const insets = useSafeAreaInsets();
   const feedStatus = useAppSelector(selectVideoFeedStatus);
   const feed = useAppSelector(selectVideoFeed);
@@ -45,6 +50,9 @@ export default function VideoLearningScreen() {
   const submitStatus = useAppSelector((state) => state.videoLearning.submitStatus);
   const lastSubmission = useAppSelector((state) => state.videoLearning.lastSubmission);
   const [showSettings, setShowSettings] = useState(false);
+  const [pendingFocusVideoId, setPendingFocusVideoId] = useState<string | null>(null);
+  const [pinnedVideoId, setPinnedVideoId] = useState<string | null>(null);
+  const focusTokenRef = useRef<string | null>(null);
 
   // Track if this tab is focused - using multiple methods
   const isTabFocused = useIsFocused();
@@ -77,6 +85,34 @@ export default function VideoLearningScreen() {
       dispatch(fetchVideoFeedWithRelaxation({ attemptNumber: 0 }));
     }
   }, [dispatch, feedStatus, isTabFocused]);
+
+  const normalizedContentId = Array.isArray(contentIdParam)
+    ? contentIdParam[0]
+    : contentIdParam;
+  const normalizedFocusToken = Array.isArray(focusToken)
+    ? focusToken[0]
+    : focusToken;
+
+  const focusKey =
+    typeof normalizedFocusToken === "string" && normalizedFocusToken.length > 0
+      ? normalizedFocusToken
+      : typeof normalizedContentId === "string" && normalizedContentId.trim().length > 0
+      ? `manual-${normalizedContentId}`
+      : null;
+
+  useEffect(() => {
+    if (
+      typeof normalizedContentId === "string" &&
+      normalizedContentId.trim().length > 0 &&
+      focusKey &&
+      focusTokenRef.current !== focusKey
+    ) {
+      focusTokenRef.current = focusKey;
+      setPendingFocusVideoId(normalizedContentId);
+      setPinnedVideoId(normalizedContentId);
+      dispatch(loadVideoContent(normalizedContentId));
+    }
+  }, [normalizedContentId, focusKey, dispatch]);
 
   // Optimized prefetch: load only first PREFETCH_BATCH videos initially
   // More will be loaded as user scrolls (handled by VideoFeed component)
@@ -111,6 +147,30 @@ export default function VideoLearningScreen() {
       .map((item) => loadedContents[item.id])
       .filter((content): content is VideoContent => content !== undefined);
   }, [feed, loadedContents]);
+
+  const videosWithPinned = useMemo(() => {
+    if (!pinnedVideoId) {
+      return videos;
+    }
+
+    if (videos.some((video) => video.id === pinnedVideoId)) {
+      return videos;
+    }
+
+    const pinnedContent = loadedContents[pinnedVideoId];
+    if (!pinnedContent) {
+      return videos;
+    }
+
+    return [pinnedContent, ...videos];
+  }, [videos, pinnedVideoId, loadedContents]);
+
+  useEffect(() => {
+    if (!pinnedVideoId) return;
+    if (videos.some((video) => video.id === pinnedVideoId)) {
+      setPinnedVideoId(null);
+    }
+  }, [videos, pinnedVideoId]);
 
   const handleSubmitExercises = useCallback(
     (contentId: string, answers: SubmitAnswerPayload[]) => {
@@ -180,7 +240,7 @@ export default function VideoLearningScreen() {
   }
 
   // Show loading only if we don't have at least the first video
-  if (videos.length === 0 && feedStatus === "succeeded") {
+  if (videosWithPinned.length === 0 && feedStatus === "succeeded") {
     return (
       <SafeAreaView
         style={[styles.centered, { backgroundColor: theme.colors.background }]}
@@ -196,7 +256,7 @@ export default function VideoLearningScreen() {
   return (
     <View style={styles.container}>
       <VideoFeed
-        videos={videos}
+        videos={videosWithPinned}
         totalFeedCount={feed.length}
         completedVideoIds={completedVideoIds}
         onSubmitExercises={handleSubmitExercises}
@@ -205,6 +265,8 @@ export default function VideoLearningScreen() {
         likesUpdating={likesUpdating}
         onToggleLike={handleToggleLike}
         isTabFocused={finalIsTabFocused}
+        focusVideoId={pendingFocusVideoId}
+        onClearFocus={() => setPendingFocusVideoId(null)}
       />
     </View>
   );

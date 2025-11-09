@@ -20,7 +20,9 @@
       },
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false,
-      "permissions": [],
+      "permissions": [
+        "android.permission.WAKE_LOCK"
+      ],
       "package": "com.mgodagov.EnglishPlatform"
     },
     "web": {
@@ -58,7 +60,8 @@
       },
       "eas": {
         "projectId": "734f226b-7d26-4105-bc60-6c69b4825122"
-      }
+      },
+      "EXPO_PUBLIC_API_URL": "https://api.slothary.ru/api"
     }
   }
 }
