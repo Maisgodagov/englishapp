@@ -1,6 +1,7 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
+  Alert,
   Animated,
   Platform,
   StyleSheet,
@@ -10,7 +11,12 @@ import {
   PanResponder,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import Video, { OnLoadData, OnProgressData, OnBufferData, OnBandwidthUpdateData } from "react-native-video";
+import Video, {
+  OnLoadData,
+  OnProgressData,
+  OnBufferData,
+  OnBandwidthUpdateData,
+} from "react-native-video";
 import { Ionicons } from "@expo/vector-icons";
 
 import { Typography } from "@shared/ui";
@@ -20,133 +26,29 @@ import {
   selectShowRussianSubtitles,
 } from "../model/videoSettingsSlice";
 import { selectGlobalVolume } from "../model/volumeSettingsSlice";
-import type { VideoContent } from "../api/videoLearningApi";
-import { SCREEN_WIDTH, getContentHeight, getVideoFeedHeight } from "@shared/utils/dimensions";
+import type {
+  TranscriptChunk,
+  VideoContent,
+} from "../api/videoLearningApi";
+import {
+  SCREEN_WIDTH,
+  getContentHeight,
+  getVideoFeedHeight,
+} from "@shared/utils/dimensions";
 import {
   resetVideoDataUsage,
   useVideoDataUsage,
 } from "../model/videoDataUsageStore";
 import { useVideoDataUsageTracker } from "../model/videoDataUsageTracker";
+import { VideoFiltersBar } from "./VideoFiltersBar";
+import { ViewModeToggle } from "./ViewModeToggle";
+import { SubtitleToggles } from "./SubtitleToggles";
+import { ModerationFilterButton } from "./ModerationFilterButton";
+import { videoModerationApi } from "../api/videoModerationApi";
+import { SubtitleChunkEditor } from "./SubtitleChunkEditor";
+import { selectIsAdmin, selectUserProfile } from "@entities/user/model/selectors";
 
 const DOUBLE_TAP_DELAY = 250;
-
-// Topic translation map - moved outside component to prevent recreation
-// Based on backend videoTopics list (54 topics total)
-const TOPIC_TRANSLATIONS: Record<string, string> = {
-  // Original 39 topics
-  business: "Бизнес",
-  technology: "Технологии",
-  science: "Наука",
-  health: "Здоровье",
-  education: "Образование",
-  entertainment: "Развлечения",
-  sports: "Спорт",
-  travel: "Путешествия",
-  food: "Еда",
-  fashion: "Мода",
-  art: "Искусство",
-  music: "Музыка",
-  movies: "Фильмы",
-  gaming: "Игры",
-  news: "Новости",
-  politics: "Политика",
-  history: "История", // История как наука/прошлое
-  nature: "Природа",
-  animals: "Животные",
-  space: "Космос",
-  environment: "Экология",
-  "social issues": "Социальные вопросы",
-  psychology: "Психология",
-  philosophy: "Философия",
-  lifestyle: "Стиль жизни",
-  relationships: "Отношения",
-  career: "Карьера",
-  finance: "Финансы",
-  motivation: "Мотивация",
-  comedy: "Комедия",
-  drama: "Драма",
-  documentary: "Документальное",
-  tutorial: "Обучение",
-  review: "Обзор",
-  interview: "Интервью",
-  vlog: "Влог",
-  challenge: "Челлендж",
-  story: "Рассказ", // Рассказ/История (повествование)
-  "daily life": "Повседневная жизнь",
-
-  // New 15 topics
-  cooking: "Готовка",
-  diy: "Своими руками",
-  beauty: "Красота",
-  fitness: "Фитнес",
-  product: "Продукт",
-  unboxing: "Распаковка",
-  comparison: "Сравнение",
-  culture: "Культура",
-  language: "Язык",
-  "how-to": "Как сделать",
-  tips: "Советы",
-  reaction: "Реакция",
-  prank: "Розыгрыш",
-  experiment: "Эксперимент",
-  "behind the scenes": "За кадром",
-
-  // Alternative spellings (no spaces, hyphens, different cases)
-  socialissues: "Социальные вопросы",
-  "social-issues": "Социальные вопросы",
-  dailylife: "Повседневная жизнь",
-  "daily-life": "Повседневная жизнь",
-  howto: "Как сделать",
-  "how to": "Как сделать",
-  behindthescenes: "За кадром",
-  "behind-the-scenes": "За кадром",
-};
-
-// Helper function moved outside component to prevent recreation
-const translateTopic = (topic: string): string => {
-  if (!topic) return '';
-
-  // Try exact match (case insensitive)
-  const lowerTopic = topic.toLowerCase().trim();
-  if (TOPIC_TRANSLATIONS[lowerTopic]) {
-    return TOPIC_TRANSLATIONS[lowerTopic];
-  }
-
-  // Try with spaces replaced by nothing (e.g., "daily life" -> "dailylife")
-  const withoutSpaces = lowerTopic.replace(/\s+/g, '');
-  if (TOPIC_TRANSLATIONS[withoutSpaces]) {
-    return TOPIC_TRANSLATIONS[withoutSpaces];
-  }
-
-  // Try with spaces replaced by hyphens (e.g., "stand up" -> "stand-up")
-  const withHyphens = lowerTopic.replace(/\s+/g, '-');
-  if (TOPIC_TRANSLATIONS[withHyphens]) {
-    return TOPIC_TRANSLATIONS[withHyphens];
-  }
-
-  // Return capitalized original if no translation found
-  return topic.charAt(0).toUpperCase() + topic.slice(1);
-};
-
-// Helper function for level colors - moved outside component
-const getLevelColor = (level: string): string => {
-  switch (level) {
-    case "A1":
-      return "#4CAF50"; // Green
-    case "A2":
-      return "#8BC34A"; // Light Green
-    case "B1":
-      return "#FFC107"; // Amber
-    case "B2":
-      return "#FF9800"; // Orange
-    case "C1":
-      return "#FF5722"; // Deep Orange
-    case "C2":
-      return "#F44336"; // Red
-    default:
-      return "#9E9E9E"; // Grey
-  }
-};
 
 // Helper function to format time as MM:SS
 const formatTime = (seconds: number): string => {
@@ -164,6 +66,7 @@ interface VideoFeedItemProps {
   isTabFocused: boolean;
   shouldPrefetch?: boolean;
   prefetchCancelled?: boolean;
+  onOpenModeration?: () => void;
 }
 
 const VideoFeedItemComponent = ({
@@ -175,6 +78,7 @@ const VideoFeedItemComponent = ({
   isTabFocused,
   shouldPrefetch = false,
   prefetchCancelled = false,
+  onOpenModeration,
 }: VideoFeedItemProps) => {
   const insets = useSafeAreaInsets();
   const pauseIconAnim = useRef(new Animated.Value(0)).current;
@@ -207,15 +111,19 @@ const VideoFeedItemComponent = ({
 
   // Optimistic like state for instant UI update
   const [optimisticLike, setOptimisticLike] = useState<boolean | null>(null);
-  const [optimisticLikeCount, setOptimisticLikeCount] = useState<number | null>(null);
+  const [optimisticLikeCount, setOptimisticLikeCount] = useState<number | null>(
+    null
+  );
 
   const shouldLoad = isActive && isTabFocused;
   const totalUsageBytes = useVideoDataUsage();
   const videoRef = useRef<Video>(null);
 
   // Use optimistic state if available, otherwise use actual content state
-  const displayIsLiked = optimisticLike !== null ? optimisticLike : content.isLiked;
-  const displayLikesCount = optimisticLikeCount !== null ? optimisticLikeCount : content.likesCount;
+  const displayIsLiked =
+    optimisticLike !== null ? optimisticLike : content.isLiked;
+  const displayLikesCount =
+    optimisticLikeCount !== null ? optimisticLikeCount : content.likesCount;
 
   // Data usage tracker - monitors bandwidth and calculates traffic
   const dataUsageTracker = useVideoDataUsageTracker({
@@ -254,7 +162,6 @@ const VideoFeedItemComponent = ({
     [VIDEO_HEIGHT]
   );
 
-
   const updateIsSeeking = useCallback((value: boolean) => {
     isSeekingRef.current = value;
     setIsSeeking(value);
@@ -267,14 +174,37 @@ const VideoFeedItemComponent = ({
   // Get volume settings
   const globalVolume = useAppSelector(selectGlobalVolume);
 
-  const transcriptChunks = useMemo(
-    () => content.transcription?.chunks ?? [],
-    [content.transcription]
+  // Check if user is admin
+  const isAdmin = useAppSelector(selectIsAdmin);
+  const profile = useAppSelector(selectUserProfile);
+
+  const [transcriptChunks, setTranscriptChunks] = useState<TranscriptChunk[]>(
+    () => content.transcription?.chunks ?? []
   );
-  const translationChunks = useMemo(
-    () => content.translation?.chunks ?? [],
-    [content.translation]
+  const [translationChunks, setTranslationChunks] = useState<TranscriptChunk[]>(
+    () => content.translation?.chunks ?? []
   );
+  const [subtitleEditorState, setSubtitleEditorState] = useState<{
+    chunkIndex: number;
+    englishText: string;
+    russianText: string;
+    englishTimestamp: [number, number];
+    russianTimestamp: [number, number];
+  } | null>(null);
+  const [isSavingSubtitle, setIsSavingSubtitle] = useState(false);
+  const wasPlayingBeforeEditorRef = useRef(false);
+
+  useEffect(() => {
+    setTranscriptChunks(content.transcription?.chunks ?? []);
+    setTranslationChunks(content.translation?.chunks ?? []);
+  }, [content.id, content.transcription, content.translation]);
+
+  const resumePlaybackAfterEditor = useCallback(() => {
+    if (wasPlayingBeforeEditorRef.current && shouldLoad) {
+      setIsPlaying(true);
+    }
+    wasPlayingBeforeEditorRef.current = false;
+  }, [setIsPlaying, shouldLoad]);
 
   const activeChunkIndex = useMemo(() => {
     if (transcriptChunks.length === 0) return -1;
@@ -310,6 +240,103 @@ const VideoFeedItemComponent = ({
     }
     return translationChunks[0] ?? null;
   }, [activeChunkIndex, translationChunks]);
+
+  const handleOpenSubtitleEditor = useCallback(() => {
+    if (!isAdmin || !activeTranscript || activeChunkIndex < 0) {
+      return;
+    }
+    wasPlayingBeforeEditorRef.current = isPlaying;
+    if (isPlaying) {
+      setIsPlaying(false);
+    }
+    setSubtitleEditorState({
+      chunkIndex: activeChunkIndex,
+      englishText: activeTranscript.text,
+      russianText: activeTranslation?.text ?? "",
+      englishTimestamp: activeTranscript.timestamp,
+      russianTimestamp: activeTranslation?.timestamp ?? activeTranscript.timestamp,
+    });
+  }, [
+    isAdmin,
+    activeTranscript,
+    activeChunkIndex,
+    activeTranslation,
+    isPlaying,
+    setIsPlaying,
+  ]);
+
+  const handleEnglishSubtitleChange = useCallback((value: string) => {
+    setSubtitleEditorState((prev) =>
+      prev ? { ...prev, englishText: value } : prev
+    );
+  }, []);
+
+  const handleRussianSubtitleChange = useCallback((value: string) => {
+    setSubtitleEditorState((prev) =>
+      prev ? { ...prev, russianText: value } : prev
+    );
+  }, []);
+
+  const handleCancelSubtitleEditor = useCallback(() => {
+    setSubtitleEditorState(null);
+    resumePlaybackAfterEditor();
+  }, [resumePlaybackAfterEditor]);
+
+  const handleSaveSubtitleChunk = useCallback(async () => {
+    if (!subtitleEditorState) {
+      return;
+    }
+    if (!profile) {
+      Alert.alert("Error", "Unable to edit subtitles: missing user data.");
+      return;
+    }
+    const englishText = subtitleEditorState.englishText.trim();
+    const russianText = subtitleEditorState.russianText.trim();
+    if (!englishText || !russianText) {
+      Alert.alert(
+        "Error",
+        "Both English and Russian subtitle texts must be filled in."
+      );
+      return;
+    }
+
+    setIsSavingSubtitle(true);
+    try {
+      const updated = await videoModerationApi.updateSubtitleChunk(
+        content.id,
+        {
+          chunkIndex: subtitleEditorState.chunkIndex,
+          transcript: {
+            text: englishText,
+            timestamp: subtitleEditorState.englishTimestamp,
+          },
+          translation: {
+            text: russianText,
+            timestamp: subtitleEditorState.russianTimestamp,
+          },
+        },
+        profile.id,
+        profile.role
+      );
+      setTranscriptChunks(updated.transcription?.chunks ?? []);
+      setTranslationChunks(updated.translation?.chunks ?? []);
+      setSubtitleEditorState(null);
+      resumePlaybackAfterEditor();
+    } catch (error) {
+      console.error("[VideoFeedItem] Failed to update subtitle chunk", error);
+      Alert.alert(
+        "Error",
+        "Failed to save subtitle changes. Please try again."
+      );
+    } finally {
+      setIsSavingSubtitle(false);
+    }
+  }, [
+    subtitleEditorState,
+    profile,
+    content.id,
+    resumePlaybackAfterEditor,
+  ]);
 
   // Reset video state when content changes
   useEffect(() => {
@@ -514,7 +541,13 @@ const VideoFeedItemComponent = ({
 
     // Send to server
     onToggleLike(content.id, nextLike);
-  }, [content.id, displayIsLiked, displayLikesCount, isLikePending, onToggleLike]);
+  }, [
+    content.id,
+    displayIsLiked,
+    displayLikesCount,
+    isLikePending,
+    onToggleLike,
+  ]);
 
   const progress = duration > 0 ? currentTime / duration : 0;
 
@@ -563,50 +596,37 @@ const VideoFeedItemComponent = ({
   // Playback is now controlled directly via Video component props (paused, volume)
   // No manual play/pause needed
 
-  const levelColor = useMemo(
-    () => getLevelColor(content.analysis.cefrLevel),
-    [content.analysis.cefrLevel]
-  );
-
   return (
-    <View style={[styles.container, { height: CONTAINER_HEIGHT }]}>
-      {/* Badges row at the top */}
-      <View style={styles.badgesContainer}>
-        <View style={styles.badgesRow}>
-          {/* Level Badge */}
-          <View
-            style={[
-              styles.badge,
-              styles.levelBadge,
-              { backgroundColor: levelColor },
-            ]}
-          >
-            <Typography
-              variant="caption"
-              style={styles.badgeText}
-              enableWordLookup={false}
+    <>
+      <View style={[styles.container, { height: CONTAINER_HEIGHT }]}>
+      {/* Filters bar at the top */}
+      {isActive && <VideoFiltersBar />}
+
+      {/* Admin controls on the left */}
+      {isActive && isAdmin && (
+        <View style={styles.leftControlsWrapper}>
+          <ModerationFilterButton />
+          {onOpenModeration && (
+            <TouchableOpacity
+              onPress={onOpenModeration}
+              activeOpacity={0.7}
+              style={[
+                styles.moderationButton,
+                {
+                  backgroundColor: content.isModerated
+                    ? "rgba(76, 175, 80, 0.9)"
+                    : "rgba(239, 68, 68, 0.9)",
+                },
+              ]}
             >
-              {content.analysis.cefrLevel}
-            </Typography>
-          </View>
-
-          {/* Topic Badges */}
-          {content.analysis.topics.slice(0, 2).map((topic, idx) => (
-            <View key={idx} style={[styles.badge, styles.topicBadge]}>
-              <Typography
-                variant="caption"
-                style={styles.badgeText}
-                enableWordLookup={false}
-              >
-                {translateTopic(topic)}
-              </Typography>
-            </View>
-          ))}
+              <Ionicons name="shield-checkmark" size={24} color="#FFFFFF" />
+            </TouchableOpacity>
+          )}
         </View>
-      </View>
+      )}
 
-      {/* Like button centered on the right */}
-      <View style={styles.likeButtonWrapper}>
+      {/* Like button and controls on the right */}
+      <View style={styles.rightControlsWrapper}>
         <TouchableOpacity
           onPress={handleLikePress}
           activeOpacity={0.7}
@@ -628,10 +648,18 @@ const VideoFeedItemComponent = ({
         >
           {displayLikesCount}
         </Typography>
+
+        {/* All controls in one column */}
+        {isActive && (
+          <>
+            <ViewModeToggle />
+            <SubtitleToggles />
+          </>
+        )}
       </View>
 
       {/* Video container with black background */}
-      <View style={styles.videoContainer}>
+      <View style={[styles.videoContainer, { paddingTop: insets.top + 2 }]}>
         {/* Prefetch video - hidden, paused, only loads when shouldPrefetch is true */}
         {shouldPrefetch && !prefetchCancelled && !isActive && (
           <Video
@@ -640,9 +668,9 @@ const VideoFeedItemComponent = ({
             paused={true}
             muted={true}
             controls={false}
-            maxBitRate={1500000}  // Lower quality for prefetch to save bandwidth
+            maxBitRate={1500000} // Lower quality for prefetch to save bandwidth
             bufferConfig={{
-              minBufferMs: 3000,  // Only buffer first 3 seconds
+              minBufferMs: 3000, // Only buffer first 3 seconds
               maxBufferMs: 3000,
               bufferForPlaybackMs: 500,
               bufferForPlaybackAfterRebufferMs: 1000,
@@ -658,27 +686,27 @@ const VideoFeedItemComponent = ({
               style={[
                 videoStyle,
                 !isVideoReady && { opacity: 0 }, // Hide until ready to prevent flickering
-              ]}  // OPTIMIZATION: Use memoized style to prevent recreation
-            resizeMode="cover"
-            repeat={true}  // Loop videos continuously
-            paused={!isPlaying || !isActive || !isTabFocused}
-            volume={globalVolume}
-            muted={false}
-            playInBackground={false}
-            playWhenInactive={false}
-            controls={false}  // Disable native video controls
-            maxBitRate={2000000}  // Limit to 2 Mbps (~720p) to save bandwidth
-            onLoad={handleVideoLoad}  // OPTIMIZATION: Use memoized handler to prevent Video recreation
-            onProgress={handleVideoProgress}  // OPTIMIZATION: Use memoized handler
-            onBandwidthUpdate={handleVideoBandwidthUpdate}  // OPTIMIZATION: Use memoized handler
-            onBuffer={handleVideoBuffer}  // OPTIMIZATION: Use memoized handler
-            onError={handleVideoError}  // OPTIMIZATION: Use memoized handler
-            onPlaybackStateChanged={handlePlaybackStateChanged}  // OPTIMIZATION: Use memoized handler
-            onEnd={handleVideoEnd}  // Reset progress when video loops
-            bufferConfig={bufferConfig}  // OPTIMIZATION: Use memoized config to prevent recreation
-            progressUpdateInterval={250}  // Update progress bar 4 times per second for smooth animation
-            ignoreSilentSwitch="ignore"
-            mixWithOthers="duck"
+              ]} // OPTIMIZATION: Use memoized style to prevent recreation
+              resizeMode="cover"
+              repeat={true} // Loop videos continuously
+              paused={!isPlaying || !isActive || !isTabFocused}
+              volume={globalVolume}
+              muted={false}
+              playInBackground={false}
+              playWhenInactive={false}
+              controls={false} // Disable native video controls
+              maxBitRate={2000000} // Limit to 2 Mbps (~720p) to save bandwidth
+              onLoad={handleVideoLoad} // OPTIMIZATION: Use memoized handler to prevent Video recreation
+              onProgress={handleVideoProgress} // OPTIMIZATION: Use memoized handler
+              onBandwidthUpdate={handleVideoBandwidthUpdate} // OPTIMIZATION: Use memoized handler
+              onBuffer={handleVideoBuffer} // OPTIMIZATION: Use memoized handler
+              onError={handleVideoError} // OPTIMIZATION: Use memoized handler
+              onPlaybackStateChanged={handlePlaybackStateChanged} // OPTIMIZATION: Use memoized handler
+              onEnd={handleVideoEnd} // Reset progress when video loops
+              bufferConfig={bufferConfig} // OPTIMIZATION: Use memoized config to prevent recreation
+              progressUpdateInterval={250} // Update progress bar 4 times per second for smooth animation
+              ignoreSilentSwitch="ignore"
+              mixWithOthers="duck"
             />
             {/* Black placeholder with spinner while video loads */}
             {!isVideoReady && !hasError && (
@@ -686,14 +714,14 @@ const VideoFeedItemComponent = ({
                 style={[
                   styles.video,
                   {
-                    position: 'absolute',
+                    position: "absolute",
                     top: 0,
                     left: 0,
                     width: SCREEN_WIDTH,
                     height: VIDEO_HEIGHT,
                     backgroundColor: "#000",
-                    justifyContent: 'center',
-                    alignItems: 'center',
+                    justifyContent: "center",
+                    alignItems: "center",
                   },
                 ]}
               >
@@ -707,28 +735,40 @@ const VideoFeedItemComponent = ({
                 style={[
                   styles.video,
                   {
-                    position: 'absolute',
+                    position: "absolute",
                     top: 0,
                     left: 0,
                     width: SCREEN_WIDTH,
                     height: VIDEO_HEIGHT,
                     backgroundColor: "rgba(0,0,0,0.9)",
-                    justifyContent: 'center',
-                    alignItems: 'center',
+                    justifyContent: "center",
+                    alignItems: "center",
                     padding: 20,
                   },
                 ]}
               >
-                <Ionicons name="alert-circle-outline" size={64} color="#FF6B6B" />
+                <Ionicons
+                  name="alert-circle-outline"
+                  size={64}
+                  color="#FF6B6B"
+                />
                 <Typography
                   variant="subtitle"
-                  style={{ color: "#FFFFFF", marginTop: 16, textAlign: "center" }}
+                  style={{
+                    color: "#FFFFFF",
+                    marginTop: 16,
+                    textAlign: "center",
+                  }}
                 >
                   Не удалось загрузить видео
                 </Typography>
                 <Typography
                   variant="body"
-                  style={{ color: "rgba(255, 255, 255, 0.7)", marginTop: 8, textAlign: "center" }}
+                  style={{
+                    color: "rgba(255, 255, 255, 0.7)",
+                    marginTop: 8,
+                    textAlign: "center",
+                  }}
                 >
                   Проверьте подключение к сети
                 </Typography>
@@ -792,6 +832,20 @@ const VideoFeedItemComponent = ({
           <View style={styles.subtitleContainer}>
             {showEnglishSubtitles && activeTranscript && (
               <View style={styles.subtitleBox}>
+                {isAdmin && (
+                  <TouchableOpacity
+                    style={styles.subtitleEditButton}
+                    onPress={handleOpenSubtitleEditor}
+                    disabled={isSavingSubtitle}
+                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                  >
+                    <Ionicons
+                      name="pencil"
+                      size={15}
+                      color="rgba(255,255,255,0.8)"
+                    />
+                  </TouchableOpacity>
+                )}
                 <Typography
                   variant="body"
                   style={styles.subtitleEn}
@@ -871,6 +925,19 @@ const VideoFeedItemComponent = ({
         </TouchableWithoutFeedback>
       </View>
     </View>
+      <SubtitleChunkEditor
+        visible={Boolean(subtitleEditorState)}
+        englishValue={subtitleEditorState?.englishText ?? ""}
+        russianValue={subtitleEditorState?.russianText ?? ""}
+        englishTimestamp={subtitleEditorState?.englishTimestamp}
+        russianTimestamp={subtitleEditorState?.russianTimestamp}
+        onChangeEnglish={handleEnglishSubtitleChange}
+        onChangeRussian={handleRussianSubtitleChange}
+        onClose={handleCancelSubtitleEditor}
+        onSave={handleSaveSubtitleChunk}
+        isSaving={isSavingSubtitle}
+      />
+    </>
   );
 };
 
@@ -880,49 +947,23 @@ const styles = StyleSheet.create({
     backgroundColor: "#000000",
     position: "relative",
   },
-  badgesContainer: {
+  leftControlsWrapper: {
     position: "absolute",
-    left: 0,
-    right: 0,
-    paddingHorizontal: 12,
-    paddingTop: 17,
-    paddingBottom: 8,
-    zIndex: 100,
-  },
-  badgesRow: {
-    flexDirection: "row",
+    left: 8,
+    top: "50%",
+    transform: [{ translateY: -30 }],
     alignItems: "center",
-    gap: 6,
-    flexWrap: "wrap",
+    zIndex: 100,
+    gap: 12,
   },
-  badge: {
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    borderRadius: 14,
-    elevation: 3,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.4,
-    shadowRadius: 3,
-  },
-  badgeText: {
-    color: "#FFFFFF",
-    fontWeight: "700",
-    fontSize: 11,
-    letterSpacing: 0.2,
-    includeFontPadding: false,
-    fontFamily: Platform.select({
-      ios: "System",
-      android: "Roboto",
-    }),
-  },
-  likeButtonWrapper: {
+  rightControlsWrapper: {
     position: "absolute",
     right: 8,
     top: "50%",
-    transform: [{ translateY: -44 }], // Half of button (32) + text height (~12)
+    transform: [{ translateY: -120 }],
     alignItems: "center",
     zIndex: 100,
+    gap: 12,
   },
   likeButton: {
     width: 64,
@@ -946,6 +987,13 @@ const styles = StyleSheet.create({
   },
   likeCountActive: {
     color: "#E11D48",
+  },
+  moderationButton: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    alignItems: "center",
+    justifyContent: "center",
   },
   usageContainer: {
     alignItems: "center",
@@ -974,7 +1022,7 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   video: {
-    // Temporarily scaled down by 10% to check cropping
+    marginTop: 2,
   },
   videoInner: {
     width: "100%",
@@ -1015,13 +1063,6 @@ const styles = StyleSheet.create({
     justifyContent: "flex-end",
     paddingHorizontal: 20,
   },
-  // Badge variants
-  levelBadge: {
-    // backgroundColor set dynamically based on CEFR level
-  },
-  topicBadge: {
-    backgroundColor: "rgba(255, 255, 255, 0.25)",
-  },
   // Completed Badge - Compact
   completedBadge: {
     position: "absolute",
@@ -1053,14 +1094,16 @@ const styles = StyleSheet.create({
   },
   // Subtitles - Less transparent
   subtitleContainer: {
-    gap: 10,
-    marginBottom: 16,
+    gap: 12,
+    marginBottom: -50,
+    zIndex: 5,
+    position: "relative",
   },
   subtitleBox: {
     backgroundColor: "rgba(0, 0, 0, 0.90)",
-    paddingVertical: 14,
-    paddingHorizontal: 18,
-    borderRadius: 16,
+    paddingVertical: 18,
+    paddingHorizontal: 24,
+    borderRadius: 20,
     alignSelf: "center",
     maxWidth: "90%",
     elevation: 4,
@@ -1069,12 +1112,22 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.5,
     shadowRadius: 4,
   },
+  subtitleEditButton: {
+    position: "absolute",
+    top: 8,
+    left: 10,
+    backgroundColor: "rgba(0, 0, 0, 0.4)",
+    borderRadius: 12,
+    padding: 6,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.2)",
+  },
   subtitleBoxRu: {
     backgroundColor: "rgba(0, 0, 0, 0.85)",
   },
   subtitleEn: {
     color: "#FFFFFF",
-    fontSize: 20,
+    fontSize: 24,
     fontWeight: "600",
     textAlign: "center",
     includeFontPadding: false,
@@ -1085,7 +1138,7 @@ const styles = StyleSheet.create({
   },
   subtitleRu: {
     color: "#F0F0F0",
-    fontSize: 17,
+    fontSize: 20,
     textAlign: "center",
     includeFontPadding: false,
     fontFamily: Platform.select({
@@ -1110,13 +1163,13 @@ const styles = StyleSheet.create({
   },
   progressBarContainer: {
     position: "absolute",
-    bottom: 34,
+    bottom: -8,
     left: 0,
     right: 0,
     height: 20,
     justifyContent: "center",
     paddingHorizontal: 0,
-    zIndex: 2,
+    zIndex: 10,
   },
   progressBar: {
     height: 4,

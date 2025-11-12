@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect, useRef } from "react";
+import React, { useState, useCallback, useEffect, useRef, useMemo } from "react";
 
 import {
   ActivityIndicator,
@@ -206,7 +206,7 @@ const ensureSnippetCacheDir = async () => {
   }
 };
 
-const buildSnippetPlaylistContent = (snippet: PhraseSnippet) => {
+const buildSnippetSegmentPlan = (snippet: PhraseSnippet) => {
   const baseUrl = resolveBaseVideoUrl(snippet.videoUrl);
 
   const safeStart = Math.max(0, snippet.startSeconds);
@@ -224,6 +224,70 @@ const buildSnippetPlaylistContent = (snippet: PhraseSnippet) => {
     Math.ceil(safeEnd / CMAF_SEGMENT_DURATION)
   );
 
+  return {
+    baseUrl,
+    startSegment,
+
+    endSegmentExclusive,
+    initUrl: `${baseUrl}${CMAF_PROFILE_PREFIX}_init.mp4`,
+    segmentUrls: Array.from(
+      { length: endSegmentExclusive - startSegment },
+      (_value, offset) => ({
+        index: startSegment + offset,
+        url: `${baseUrl}${CMAF_PROFILE_PREFIX}_${formatSegmentIndex(
+          startSegment + offset
+        )}.m4s`,
+      })
+    ),
+  };
+};
+
+const downloadFileIfNeeded = async (remoteUrl: string, localPath: string) => {
+  try {
+    const info = await FileSystem.getInfoAsync(localPath);
+    if (info.exists) {
+      return;
+    }
+  } catch {
+    // Ignore missing cache info and attempt to download again
+  }
+
+  await FileSystem.downloadAsync(remoteUrl, localPath);
+};
+
+const snippetPlaylistCache = new Map<string, string>();
+const snippetPlaylistPromises = new Map<string, Promise<string>>();
+
+const getSnippetCacheKey = (snippet: PhraseSnippet) => snippet.id;
+
+const createSnippetPlaylistFile = async (
+  snippet: PhraseSnippet
+): Promise<string> => {
+  await ensureSnippetCacheDir();
+
+  const { startSegment, endSegmentExclusive, initUrl, segmentUrls } =
+    buildSnippetSegmentPlan(snippet);
+
+  const snippetFolder = `${SNIPPET_CACHE_DIR}${sanitizeSnippetId(
+    snippet.id
+  )}/`;
+
+  await FileSystem.makeDirectoryAsync(snippetFolder, {
+    intermediates: true,
+  });
+
+  const initPath = `${snippetFolder}${CMAF_PROFILE_PREFIX}_init.mp4`;
+  await downloadFileIfNeeded(initUrl, initPath);
+
+  const segmentPaths: string[] = [];
+  for (const segment of segmentUrls) {
+    const localSegmentPath = `${snippetFolder}${CMAF_PROFILE_PREFIX}_${formatSegmentIndex(
+      segment.index
+    )}.m4s`;
+    await downloadFileIfNeeded(segment.url, localSegmentPath);
+    segmentPaths.push(localSegmentPath);
+  }
+
   const lines: string[] = [
     "#EXTM3U",
 
@@ -233,35 +297,16 @@ const buildSnippetPlaylistContent = (snippet: PhraseSnippet) => {
 
     "#EXT-X-INDEPENDENT-SEGMENTS",
 
-    `#EXT-X-MAP:URI="${baseUrl}${CMAF_PROFILE_PREFIX}_init.mp4"`,
+    `#EXT-X-MAP:URI="${initPath}"`,
   ];
 
-  for (let idx = startSegment; idx < endSegmentExclusive; idx += 1) {
+  segmentPaths.forEach((segmentPath) => {
     lines.push(`#EXTINF:${CMAF_SEGMENT_DURATION.toFixed(1)},`);
 
-    lines.push(
-      `${baseUrl}${CMAF_PROFILE_PREFIX}_${formatSegmentIndex(idx)}.m4s`
-    );
-  }
+    lines.push(segmentPath);
+  });
 
   lines.push("#EXT-X-ENDLIST");
-
-  return {
-    content: lines.join("\n"),
-
-    startSegment,
-
-    endSegmentExclusive,
-  };
-};
-
-const createSnippetPlaylistFile = async (
-  snippet: PhraseSnippet
-): Promise<string> => {
-  await ensureSnippetCacheDir();
-
-  const { content, startSegment, endSegmentExclusive } =
-    buildSnippetPlaylistContent(snippet);
 
   const fileName = `${sanitizeSnippetId(
     snippet.id
@@ -269,17 +314,43 @@ const createSnippetPlaylistFile = async (
 
   const filePath = `${SNIPPET_CACHE_DIR}${fileName}`;
 
-  await FileSystem.writeAsStringAsync(filePath, content, {
+  await FileSystem.writeAsStringAsync(filePath, lines.join("\n"), {
     encoding: FileSystem.EncodingType.UTF8,
   });
 
   return filePath;
 };
 
+const ensureSnippetPlaylistReady = async (
+  snippet: PhraseSnippet
+): Promise<string> => {
+  const key = getSnippetCacheKey(snippet);
+  const cached = snippetPlaylistCache.get(key);
+  if (cached) return cached;
+
+  const existing = snippetPlaylistPromises.get(key);
+  if (existing) return existing;
+
+  const promise = ensureSnippetPlaylistReady(snippet)
+    .then((filePath) => {
+      snippetPlaylistCache.set(key, filePath);
+      snippetPlaylistPromises.delete(key);
+      return filePath;
+    })
+    .catch((error) => {
+      snippetPlaylistPromises.delete(key);
+      throw error;
+    });
+
+  snippetPlaylistPromises.set(key, promise);
+  return promise;
+};
+
 interface VideoSnippetItemProps {
   snippet: PhraseSnippet;
   theme: AppTheme;
   isActive: boolean;
+  shouldPrepare: boolean;
   showEnglishSubtitles: boolean;
   showRussianSubtitles: boolean;
   onToggleEnglish: () => void;
@@ -292,6 +363,7 @@ const VideoSnippetItem: React.FC<VideoSnippetItemProps> = ({
   snippet,
   theme,
   isActive,
+  shouldPrepare,
   showEnglishSubtitles,
   showRussianSubtitles,
   onToggleEnglish,
@@ -300,20 +372,32 @@ const VideoSnippetItem: React.FC<VideoSnippetItemProps> = ({
   highlightTerm,
 }) => {
   const [ready, setReady] = useState(false);
-
   const [playlistUri, setPlaylistUri] = useState<string | null>(null);
-
   const [preparingPlaylist, setPreparingPlaylist] = useState(false);
-
   const [playlistError, setPlaylistError] = useState<string | null>(null);
-
   const videoRef = useRef<VideoComponentRef>(null);
-
   const wasActiveRef = useRef(false);
-
   const [isManuallyPaused, setIsManuallyPaused] = useState(false);
+  const bufferConfig = useMemo(
+    () => ({
+      minBufferMs: 1200,
+      maxBufferMs: 2500,
+      bufferForPlaybackMs: 700,
+      bufferForPlaybackAfterRebufferMs: 1200,
+    }),
+    []
+  );
 
   useEffect(() => {
+    if (!shouldPrepare) {
+      setPlaylistUri(null);
+      setPreparingPlaylist(false);
+      setPlaylistError(null);
+      setReady(false);
+      wasActiveRef.current = false;
+      return;
+    }
+
     let isMounted = true;
 
     const preparePlaylist = async () => {
@@ -352,7 +436,13 @@ const VideoSnippetItem: React.FC<VideoSnippetItemProps> = ({
     return () => {
       isMounted = false;
     };
-  }, [snippet.id, snippet.startSeconds, snippet.endSeconds, snippet.videoUrl]);
+  }, [
+    shouldPrepare,
+    snippet.id,
+    snippet.startSeconds,
+    snippet.endSeconds,
+    snippet.videoUrl,
+  ]);
 
   useEffect(() => {
     setReady(false);
@@ -363,12 +453,17 @@ const VideoSnippetItem: React.FC<VideoSnippetItemProps> = ({
   }, [playlistUri]);
 
   useEffect(() => {
+    if (!shouldPrepare) {
+      setIsManuallyPaused(false);
+      return;
+    }
+
     if (ready && isActive && !wasActiveRef.current) {
       videoRef.current?.seek(0);
     }
 
     wasActiveRef.current = isActive;
-  }, [isActive, ready]);
+  }, [isActive, ready, shouldPrepare]);
 
   useEffect(() => {
     if (!isActive) {
@@ -376,7 +471,7 @@ const VideoSnippetItem: React.FC<VideoSnippetItemProps> = ({
     }
   }, [isActive]);
 
-  const paused = !isActive || !ready || isManuallyPaused;
+  const paused = !shouldPrepare || !isActive || !ready || isManuallyPaused;
 
   return (
     <View style={styles.snippetCard}>
@@ -418,7 +513,7 @@ const VideoSnippetItem: React.FC<VideoSnippetItemProps> = ({
           <Text style={styles.openVideoLabel}>Full video</Text>
           <Ionicons name="open-outline" size={16} color="#fff" />
         </Pressable>
-        {playlistUri ? (
+        {shouldPrepare && playlistUri ? (
           <>
             <Video
               ref={videoRef}
@@ -427,6 +522,8 @@ const VideoSnippetItem: React.FC<VideoSnippetItemProps> = ({
               resizeMode="cover"
               paused={paused}
               repeat
+              bufferConfig={bufferConfig}
+              maxBitRate={2_000_000}
               onLoad={() => setReady(true)}
               onError={(error) => {
                 console.error(
@@ -438,6 +535,7 @@ const VideoSnippetItem: React.FC<VideoSnippetItemProps> = ({
 
                 setReady(false);
               }}
+
             />
 
             {!ready && (
@@ -494,15 +592,21 @@ const VideoSnippetItem: React.FC<VideoSnippetItemProps> = ({
           </>
         ) : (
           <View style={[styles.video, styles.videoPlaceholder]}>
-            {preparingPlaylist ? (
-              <>
-                <ActivityIndicator size="large" color="#fff" />
+            {shouldPrepare ? (
+              preparingPlaylist ? (
+                <>
+                  <ActivityIndicator size="large" color="#fff" />
 
-                <Text style={styles.placeholderText}>Готовим отрывок…</Text>
-              </>
-            ) : playlistError ? (
-              <Text style={styles.placeholderText}>{playlistError}</Text>
-            ) : null}
+                  <Text style={styles.placeholderText}>Готовим отрывок…</Text>
+                </>
+              ) : playlistError ? (
+                <Text style={styles.placeholderText}>{playlistError}</Text>
+              ) : null
+            ) : (
+              <Text style={styles.placeholderText}>
+                Select a snippet to preview the video
+              </Text>
+            )}
           </View>
         )}
       </View>
@@ -871,6 +975,18 @@ export const PhraseSearch = () => {
   );
 
   useEffect(() => {
+    if (!isScreenFocused) return;
+    const nextSnippet = snippets[activeIndex + 1];
+    if (!nextSnippet) return;
+    ensureSnippetPlaylistReady(nextSnippet).catch((error) => {
+      console.warn(
+        `[PhraseSearch] Failed to prefetch snippet assets (${nextSnippet.id})`,
+        error
+      );
+    });
+  }, [activeIndex, snippets, isScreenFocused]);
+
+  useEffect(() => {
     return () => {
       abortControllerRef.current?.abort();
     };
@@ -1006,21 +1122,25 @@ export const PhraseSearch = () => {
             width={CAROUSEL_WIDTH}
             height={VIDEO_HEIGHT + 60}
             data={snippets}
-            renderItem={({ item, index }) => (
-              <View style={styles.carouselItem}>
-                <VideoSnippetItem
-                  snippet={item}
-                  theme={theme}
-                  isActive={index === activeIndex && isScreenFocused}
-                  showEnglishSubtitles={showEnglishSubtitles}
-                  showRussianSubtitles={showRussianSubtitles}
-                  onToggleEnglish={toggleEnglishSubtitles}
-                  onToggleRussian={toggleRussianSubtitles}
-                  onOpenFullVideo={handleOpenFullVideo}
-                  highlightTerm={highlightTerm}
-                />
-              </View>
-            )}
+            renderItem={({ item, index }) => {
+              const isSnippetActive = index === activeIndex && isScreenFocused;
+              return (
+                <View style={styles.carouselItem}>
+                  <VideoSnippetItem
+                    snippet={item}
+                    theme={theme}
+                    isActive={isSnippetActive}
+                    shouldPrepare={isSnippetActive}
+                    showEnglishSubtitles={showEnglishSubtitles}
+                    showRussianSubtitles={showRussianSubtitles}
+                    onToggleEnglish={toggleEnglishSubtitles}
+                    onToggleRussian={toggleRussianSubtitles}
+                    onOpenFullVideo={handleOpenFullVideo}
+                    highlightTerm={highlightTerm}
+                  />
+                </View>
+              );
+            }}
             onSnapToItem={handleSnapToItem}
             style={styles.carousel}
             enabled={snippets.length > 0}

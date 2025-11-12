@@ -67,11 +67,20 @@ export async function apiFetch<TResponse, TBody = unknown>(
     });
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);
-    addDebugLog('error', `API Network Error: ${method} ${endpoint}`, {
-      error: errorMessage,
-      fullUrl,
-      apiUrl: API_URL,
-    });
+    const errorName = error instanceof Error ? error.name : undefined;
+
+    if (errorName === 'AbortError') {
+      addDebugLog('info', `API Request aborted: ${method} ${endpoint}`, {
+        fullUrl,
+        apiUrl: API_URL,
+      });
+    } else {
+      addDebugLog('error', `API Network Error: ${method} ${endpoint}`, {
+        error: errorMessage,
+        fullUrl,
+        apiUrl: API_URL,
+      });
+    }
     throw error;
   }
 

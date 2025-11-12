@@ -67,6 +67,18 @@ export const videoModerationApi = {
       headers: adminHeaders(userId, role),
     });
   },
+  updateSubtitleChunk(
+    contentId: string,
+    payload: { chunkIndex: number; transcript: TranscriptChunk; translation: TranscriptChunk },
+    userId: string,
+    role: UserRole,
+  ) {
+    return apiFetch<VideoContent>(`video-learning/${contentId}/moderation/subtitles/chunk`, {
+      method: 'PATCH',
+      body: payload,
+      headers: adminHeaders(userId, role),
+    });
+  },
   updateExercises(contentId: string, exercises: Exercise[], userId: string, role: UserRole) {
     return apiFetch<VideoContent>(`video-learning/${contentId}/moderation/exercises`, {
       method: 'PATCH',

@@ -22,7 +22,6 @@ import {
   submitVideoProgress,
 } from "@features/video-learning/model/videoLearningSlice";
 import { VideoFeed } from "@features/video-learning/ui/VideoFeed";
-import { VideoSettingsModal } from "@features/video-learning/ui/VideoSettingsModal";
 import type {
   SubmitAnswerPayload,
   VideoContent,
@@ -49,7 +48,6 @@ export default function VideoLearningScreen() {
   const likesUpdating = useAppSelector(selectLikesUpdating);
   const submitStatus = useAppSelector((state) => state.videoLearning.submitStatus);
   const lastSubmission = useAppSelector((state) => state.videoLearning.lastSubmission);
-  const [showSettings, setShowSettings] = useState(false);
   const [pendingFocusVideoId, setPendingFocusVideoId] = useState<string | null>(null);
   const [pinnedVideoId, setPinnedVideoId] = useState<string | null>(null);
   const focusTokenRef = useRef<string | null>(null);
@@ -216,25 +214,12 @@ export default function VideoLearningScreen() {
       <SafeAreaView
         style={[styles.centered, { backgroundColor: theme.colors.background }]}
       >
-        <View style={[styles.settingsButton, { top: insets.top }]}>
-          <TouchableOpacity
-            onPress={() => setShowSettings(true)}
-            style={styles.headerIconButton}
-            activeOpacity={0.85}
-          >
-            <Ionicons name="ellipsis-vertical" size={24} color={theme.colors.text} />
-          </TouchableOpacity>
-        </View>
         <Typography variant="body" align="center">
           Нет доступных видео. Попробуйте позже.
         </Typography>
         <Typography variant="caption" align="center" style={styles.hintText}>
           Попробуйте изменить настройки фильтров
         </Typography>
-        <VideoSettingsModal
-          visible={showSettings}
-          onClose={() => setShowSettings(false)}
-        />
       </SafeAreaView>
     );
   }
@@ -290,16 +275,5 @@ const styles = StyleSheet.create({
   hintText: {
     marginTop: 8,
     opacity: 0.6,
-  },
-  settingsButton: {
-    position: "absolute",
-    right: 0,
-    zIndex: 100,
-  },
-  headerIconButton: {
-    width: 44,
-    height: 44,
-    alignItems: "center",
-    justifyContent: "center",
   },
 });

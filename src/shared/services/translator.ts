@@ -34,20 +34,6 @@ interface MyMemoryResponse {
 }
 
 // Unified cache for all translations
-const translationCache = new Map<string, string>();
-const MAX_CACHE_SIZE = 2000;
-
-const getCacheKey = (text: string, sourceLang: string, targetLang: string): string =>
-  `${sourceLang}:${targetLang}:${text.trim().toLowerCase()}`;
-
-const setCacheValue = (key: string, value: string) => {
-  if (translationCache.size >= MAX_CACHE_SIZE) {
-    const firstKey = translationCache.keys().next().value;
-    if (firstKey) translationCache.delete(firstKey);
-  }
-  translationCache.set(key, value);
-};
-
 /**
  * Fallback translation using MyMemory API
  */
@@ -115,13 +101,6 @@ export const translateText = async (
   }
 
   const trimmed = text.trim();
-  const cacheKey = getCacheKey(trimmed, sourceLang, targetLang);
-  const cached = translationCache.get(cacheKey);
-  if (cached) {
-    console.log('[Translator] Cache hit');
-    return cached;
-  }
-
   const start = Date.now();
 
   try {
@@ -129,7 +108,6 @@ export const translateText = async (
     const translated = await YandexTranslator.translateText(trimmed, sourceLang, targetLang);
     const elapsed = Date.now() - start;
     console.log(`[Translator] Yandex: "${trimmed}" → "${translated}" (${elapsed}ms)`);
-    setCacheValue(cacheKey, translated);
     return translated;
   } catch (yandexError) {
     console.warn('[Translator] Yandex failed, falling back to MyMemory:', yandexError);
@@ -139,7 +117,6 @@ export const translateText = async (
       const translated = await translateWithMyMemory(trimmed, sourceLang, targetLang);
       const elapsed = Date.now() - start;
       console.log(`[Translator] MyMemory fallback: "${trimmed}" → "${translated}" (${elapsed}ms)`);
-      setCacheValue(cacheKey, translated);
       return translated;
     } catch (myMemoryError) {
       console.error('[Translator] Both Yandex and MyMemory failed:', myMemoryError);
@@ -217,13 +194,12 @@ export const translateEnToRu = (text: string) => translateText(text, 'en', 'ru')
 export const translateRuToEn = (text: string) => translateText(text, 'ru', 'en');
 
 export const clearTranslationCache = () => {
-  translationCache.clear();
   YandexTranslator.clearTranslationCache();
   console.log('[Translator] Cache cleared');
 };
 
 export const getCacheStats = () => ({
-  size: translationCache.size,
-  maxSize: MAX_CACHE_SIZE,
+  size: 0,
+  maxSize: 0,
   yandex: YandexTranslator.getCacheStats(),
 });

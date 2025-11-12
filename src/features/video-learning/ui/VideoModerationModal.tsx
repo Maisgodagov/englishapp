@@ -56,47 +56,64 @@ interface VideoModerationModalProps {
   video?: VideoContent;
 }
 
-const AVAILABLE_TOPICS = [
-  "Business",
-  "Technology",
-  "Science",
-  "Health",
-  "Education",
-  "Entertainment",
-  "Sports",
-  "Travel",
-  "Food",
-  "Fashion",
-  "Art",
-  "Music",
-  "Movies",
-  "Gaming",
-  "News",
-  "Politics",
-  "History",
-  "Nature",
-  "Animals",
-  "Space",
-  "Environment",
-  "Social Issues",
-  "Psychology",
-  "Philosophy",
-  "Lifestyle",
-  "Relationships",
-  "Career",
-  "Finance",
-  "Motivation",
-  "Comedy",
-  "Drama",
-  "Documentary",
-  "Tutorial",
-  "Review",
-  "Interview",
-  "Vlog",
-  "Challenge",
-  "Story",
-  "Daily Life",
-] as const;
+const TOPIC_TRANSLATIONS: Record<string, string> = {
+  "Business": "Бизнес",
+  "Technology": "Технологии",
+  "Science": "Наука",
+  "Health": "Здоровье",
+  "Education": "Образование",
+  "Entertainment": "Развлечения",
+  "Sports": "Спорт",
+  "Travel": "Путешествия",
+  "Food": "Еда",
+  "Fashion": "Мода",
+  "Art": "Искусство",
+  "Music": "Музыка",
+  "Movies": "Кино",
+  "Gaming": "Игры",
+  "News": "Новости",
+  "Politics": "Политика",
+  "History": "История",
+  "Nature": "Природа",
+  "Animals": "Животные",
+  "Space": "Космос",
+  "Environment": "Экология",
+  "Social Issues": "Социальные вопросы",
+  "Psychology": "Психология",
+  "Philosophy": "Философия",
+  "Lifestyle": "Образ жизни",
+  "Relationships": "Отношения",
+  "Career": "Карьера",
+  "Finance": "Финансы",
+  "Motivation": "Мотивация",
+  "Comedy": "Комедия",
+  "Drama": "Драма",
+  "Documentary": "Документальное",
+  "Tutorial": "Обучение",
+  "Review": "Обзор",
+  "Interview": "Интервью",
+  "Vlog": "Влог",
+  "Challenge": "Челлендж",
+  "Story": "История",
+  "Daily Life": "Повседневная жизнь",
+  "Cooking": "Кулинария",
+  "DIY": "Своими руками",
+  "Beauty": "Красота",
+  "Fitness": "Фитнес",
+  "Product": "Продукт",
+  "Unboxing": "Распаковка",
+  "Comparison": "Сравнение",
+  "Culture": "Культура",
+  "Language": "Язык",
+  "How-to": "Как сделать",
+  "Tips": "Советы",
+  "Reaction": "Реакция",
+  "Prank": "Розыгрыш",
+  "Experiment": "Эксперимент",
+  "Behind the Scenes": "За кулисами",
+};
+
+const AVAILABLE_TOPICS = Object.keys(TOPIC_TRANSLATIONS);
 
 const CEFR_OPTIONS: { value: CEFRLevel; label: string }[] = [
   { value: 'A1', label: 'A1 - Beginner' },
@@ -286,12 +303,6 @@ export const VideoModerationModal = ({ visible, onClose, video }: VideoModeratio
       videoModerationApi.updateVocabularyComplexity(contentId, vocabComplexity, userId, role),
     );
   }, [contentId, runWithLoader, vocabComplexity]);
-
-const toggleTopic = useCallback((topic: string) => {
-  setTopics((prev) =>
-    prev.includes(topic) ? prev.filter((item) => item !== topic) : [...prev, topic],
-  );
-}, []);
 
 const saveTopics = useCallback(() => {
   if (!contentId) return;
@@ -487,58 +498,158 @@ const saveTopics = useCallback(() => {
     );
   }, []);
 
-  const renderOptionRow = (
+  const [dropdownStates, setDropdownStates] = useState<Record<string, boolean>>({});
+  const [showTagsModal, setShowTagsModal] = useState(false);
+  const [tempSelectedTags, setTempSelectedTags] = useState<string[]>([]);
+  const [showSubtitlesEditor, setShowSubtitlesEditor] = useState(false);
+  const [showExercisesEditor, setShowExercisesEditor] = useState(false);
+
+  const toggleDropdown = useCallback((key: string) => {
+    setDropdownStates(prev => ({ ...prev, [key]: !prev[key] }));
+  }, []);
+
+  const closeDropdown = useCallback((key: string) => {
+    setDropdownStates(prev => ({ ...prev, [key]: false }));
+  }, []);
+
+  const openTagsModal = useCallback(() => {
+    setTempSelectedTags([...topics]);
+    setShowTagsModal(true);
+  }, [topics]);
+
+  const closeTagsModal = useCallback(() => {
+    setShowTagsModal(false);
+  }, []);
+
+  const toggleTempTag = useCallback((tag: string) => {
+    setTempSelectedTags(prev =>
+      prev.includes(tag) ? prev.filter(t => t !== tag) : [...prev, tag]
+    );
+  }, []);
+
+  const confirmTagsSelection = useCallback(() => {
+    setTopics(tempSelectedTags);
+    setShowTagsModal(false);
+  }, [tempSelectedTags]);
+
+  const removeTag = useCallback((tag: string) => {
+    setTopics(prev => prev.filter(t => t !== tag));
+  }, []);
+
+  const renderCompactSelector = (
     title: string,
     options: { value: string; label: string }[],
     value: string,
     onSelect: (next: string) => void,
     saveKey: string,
     onSave: () => void,
-  ) => (
-    <View style={styles.section}>
-      <Typography variant="subtitle" weight="semibold" style={styles.sectionTitle}>
-        {title}
-      </Typography>
-      <View style={styles.optionRow}>
-        {options.map((option) => {
-          const active = option.value === value;
-          return (
-            <TouchableOpacity
-              key={option.value}
-              style={[
-                styles.optionChip,
-                {
-                  backgroundColor: active ? theme.colors.primary : theme.colors.surface,
-                  borderColor: active ? theme.colors.primary : theme.colors.border,
-                },
-              ]}
-              onPress={() => onSelect(option.value)}
-              activeOpacity={0.8}
-            >
-              <Typography
-                variant="body"
-                weight={active ? 'bold' : 'regular'}
-                style={{ color: active ? '#FFFFFF' : theme.colors.text }}
-              >
-                {option.label}
-              </Typography>
-            </TouchableOpacity>
-          );
-        })}
-      </View>
-      <ActionButton
-        label="Сохранить"
-        variant="primary"
-        loading={pendingKey === saveKey}
-        onPress={onSave}
-      />
-      {lastSavedKey === saveKey && (
-        <Typography variant="caption" style={styles.successLabel}>
-          Сохранено
+  ) => {
+    const selectedOption = options.find(opt => opt.value === value);
+    const isOpen = dropdownStates[saveKey] || false;
+
+    return (
+      <View style={styles.compactSection}>
+        <Typography variant="subtitle" weight="semibold" style={styles.sectionTitle}>
+          {title}
         </Typography>
-      )}
-    </View>
-  );
+        <View style={styles.compactRow}>
+          <TouchableOpacity
+            style={styles.compactDropdown}
+            onPress={() => toggleDropdown(saveKey)}
+            activeOpacity={0.7}
+          >
+            <Typography variant="body" style={{ color: theme.colors.text, flex: 1 }}>
+              {selectedOption?.label}
+            </Typography>
+            <Ionicons
+              name={isOpen ? "chevron-up" : "chevron-down"}
+              size={20}
+              color={theme.colors.textSecondary}
+            />
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[
+              styles.saveIconButton,
+              {
+                backgroundColor: pendingKey === saveKey ? theme.colors.border : theme.colors.primary,
+              }
+            ]}
+            onPress={onSave}
+            activeOpacity={0.7}
+            disabled={pendingKey === saveKey}
+          >
+            {pendingKey === saveKey ? (
+              <ActivityIndicator size="small" color="#FFFFFF" />
+            ) : lastSavedKey === saveKey ? (
+              <Ionicons name="checkmark" size={20} color="#FFFFFF" />
+            ) : (
+              <Ionicons name="save" size={20} color="#FFFFFF" />
+            )}
+          </TouchableOpacity>
+        </View>
+
+        <Modal
+          visible={isOpen}
+          transparent
+          animationType="fade"
+          onRequestClose={() => closeDropdown(saveKey)}
+        >
+          <TouchableOpacity
+            style={styles.modalOverlay}
+            activeOpacity={1}
+            onPress={() => closeDropdown(saveKey)}
+          >
+            <View style={styles.modalContainer} onStartShouldSetResponder={() => true}>
+              <View
+                style={[
+                  styles.dropdownContent,
+                  { backgroundColor: theme.colors.surface }
+                ]}
+              >
+                {options.map((option) => (
+                  <TouchableOpacity
+                    key={option.value}
+                    style={[
+                      styles.option,
+                      {
+                        backgroundColor: option.value === value
+                          ? theme.colors.primary + '15'
+                          : 'transparent',
+                        borderBottomColor: theme.colors.border,
+                      }
+                    ]}
+                    onPress={() => {
+                      onSelect(option.value);
+                      closeDropdown(saveKey);
+                    }}
+                    activeOpacity={0.7}
+                  >
+                    <Typography
+                      variant="body"
+                      style={[
+                        styles.optionText,
+                        { color: option.value === value ? theme.colors.primary : theme.colors.text }
+                      ]}
+                      enableWordLookup={false}
+                    >
+                      {option.label}
+                    </Typography>
+                    {option.value === value && (
+                      <Ionicons
+                        name="checkmark"
+                        size={20}
+                        color={theme.colors.primary}
+                      />
+                    )}
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </View>
+          </TouchableOpacity>
+        </Modal>
+      </View>
+    );
+  };
 
   if (!visible) return null;
 
@@ -583,67 +694,174 @@ const saveTopics = useCallback(() => {
               contentContainerStyle={styles.scrollContent}
               keyboardShouldPersistTaps="handled"
             >
-              {renderOptionRow('Уровень сложности', CEFR_OPTIONS, cefrLevel, (next) => setCefrLevel(next as CEFRLevel), 'cefr', saveCefr)}
-              {renderOptionRow('Скорость речи', SPEED_OPTIONS, speechSpeed, (next) => setSpeechSpeed(next as SpeechSpeed), 'speech', saveSpeech)}
-              {renderOptionRow('Грамматическая сложность', GRAMMAR_OPTIONS, grammarComplexity, (next) => setGrammarComplexity(next as GrammarComplexity), 'grammar', saveGrammar)}
-              {renderOptionRow('Сложность словаря', VOCAB_OPTIONS, vocabComplexity, (next) => setVocabComplexity(next as VocabularyComplexity), 'vocab', saveVocabulary)}
+              {renderCompactSelector('Уровень сложности', CEFR_OPTIONS, cefrLevel, (next) => setCefrLevel(next as CEFRLevel), 'cefr', saveCefr)}
+              {renderCompactSelector('Скорость речи', SPEED_OPTIONS, speechSpeed, (next) => setSpeechSpeed(next as SpeechSpeed), 'speech', saveSpeech)}
+              {renderCompactSelector('Грамматическая сложность', GRAMMAR_OPTIONS, grammarComplexity, (next) => setGrammarComplexity(next as GrammarComplexity), 'grammar', saveGrammar)}
+              {renderCompactSelector('Сложность словаря', VOCAB_OPTIONS, vocabComplexity, (next) => setVocabComplexity(next as VocabularyComplexity), 'vocab', saveVocabulary)}
 
               {/* Topics */}
-              <View style={styles.section}>
+              <View style={styles.compactSection}>
                 <Typography variant="subtitle" weight="semibold" style={styles.sectionTitle}>
-                  ���� �����
+                  Теги темы
                 </Typography>
-                <Typography variant="caption" style={{ color: theme.colors.textSecondary }}>
-                  �������� ���� ��� ��������� ���, ��������������� ������.
-                </Typography>
-                <View style={styles.topicGrid}>
-                  {AVAILABLE_TOPICS.map((topic) => {
-                    const isSelected = topics.includes(topic);
-                    return (
+                <View style={styles.tagsContainer}>
+                  {topics.map((topic) => (
+                    <View
+                      key={topic}
+                      style={[
+                        styles.tagChip,
+                        { backgroundColor: theme.colors.primary, borderColor: theme.colors.primary }
+                      ]}
+                    >
+                      <Typography
+                        variant="caption"
+                        style={{ color: '#FFFFFF', marginRight: 4 }}
+                        enableWordLookup={false}
+                      >
+                        {TOPIC_TRANSLATIONS[topic] || topic}
+                      </Typography>
+                      <TouchableOpacity onPress={() => removeTag(topic)} activeOpacity={0.7}>
+                        <Ionicons name="close-circle" size={16} color="#FFFFFF" />
+                      </TouchableOpacity>
+                    </View>
+                  ))}
+                  <TouchableOpacity
+                    style={styles.addTagButton}
+                    onPress={openTagsModal}
+                    activeOpacity={0.7}
+                  >
+                    <Ionicons name="add" size={20} color={theme.colors.text} />
+                  </TouchableOpacity>
+                </View>
+                <View style={styles.compactRow}>
+                  <TouchableOpacity
+                    style={[
+                      styles.saveIconButton,
+                      {
+                        backgroundColor: pendingKey === 'topics' ? theme.colors.border : theme.colors.primary,
+                      }
+                    ]}
+                    onPress={saveTopics}
+                    activeOpacity={0.7}
+                    disabled={pendingKey === 'topics'}
+                  >
+                    {pendingKey === 'topics' ? (
+                      <ActivityIndicator size="small" color="#FFFFFF" />
+                    ) : lastSavedKey === 'topics' ? (
+                      <Ionicons name="checkmark" size={20} color="#FFFFFF" />
+                    ) : (
+                      <Ionicons name="save" size={20} color="#FFFFFF" />
+                    )}
+                  </TouchableOpacity>
+                </View>
+
+                {/* Tags selection modal */}
+                <Modal
+                  visible={showTagsModal}
+                  transparent
+                  animationType="slide"
+                  onRequestClose={closeTagsModal}
+                >
+                  <View style={styles.tagsModalOverlay}>
+                    <View
+                      style={[
+                        styles.tagsModalContent,
+                        {
+                          backgroundColor: theme.colors.background,
+                          paddingBottom: Math.max(insets.bottom, 16),
+                        }
+                      ]}
+                    >
+                      <View style={styles.tagsModalHeader}>
+                        <Typography variant="title" weight="bold">
+                          Выберите теги
+                        </Typography>
+                        <TouchableOpacity onPress={closeTagsModal} activeOpacity={0.7}>
+                          <Ionicons name="close" size={24} color={theme.colors.text} />
+                        </TouchableOpacity>
+                      </View>
+                      <ScrollView style={styles.tagsModalScroll}>
+                        <View style={styles.topicGrid}>
+                          {AVAILABLE_TOPICS.map((topic) => {
+                            const isSelected = tempSelectedTags.includes(topic);
+                            return (
+                              <TouchableOpacity
+                                key={topic}
+                                style={[
+                                  styles.topicToggle,
+                                  {
+                                    backgroundColor: isSelected ? theme.colors.primary : theme.colors.surface,
+                                    borderColor: isSelected ? theme.colors.primary : theme.colors.border,
+                                  },
+                                ]}
+                                onPress={() => toggleTempTag(topic)}
+                                activeOpacity={0.8}
+                              >
+                                <Typography
+                                  variant="body"
+                                  weight="semibold"
+                                  style={{ color: isSelected ? '#FFFFFF' : theme.colors.text }}
+                                  enableWordLookup={false}
+                                >
+                                  {TOPIC_TRANSLATIONS[topic] || topic}
+                                </Typography>
+                              </TouchableOpacity>
+                            );
+                          })}
+                        </View>
+                      </ScrollView>
                       <TouchableOpacity
-                        key={topic}
                         style={[
-                          styles.topicToggle,
-                          {
-                            backgroundColor: isSelected ? theme.colors.primary : theme.colors.surface,
-                            borderColor: isSelected ? theme.colors.primary : theme.colors.border,
-                          },
+                          styles.confirmButton,
+                          { backgroundColor: theme.colors.primary }
                         ]}
-                        onPress={() => toggleTopic(topic)}
+                        onPress={confirmTagsSelection}
                         activeOpacity={0.8}
                       >
-                        <Typography
-                          variant="body"
-                          weight="semibold"
-                          style={{ color: isSelected ? '#FFFFFF' : theme.colors.text }}
-                        >
-                          {topic}
+                        <Ionicons name="checkmark" size={24} color="#FFFFFF" />
+                        <Typography variant="body" weight="bold" style={{ color: '#FFFFFF' }}>
+                          Подтвердить выбор
                         </Typography>
                       </TouchableOpacity>
-                    );
-                  })}
-                </View>
-                <ActionButton
-                  label="���������"
-                  variant="secondary"
-                  loading={pendingKey === 'topics'}
-                  onPress={saveTopics}
-                />
-                {lastSavedKey === 'topics' && (
-                  <Typography variant="caption" style={styles.successLabel}>
-                    ���������
-                  </Typography>
-                )}
+                    </View>
+                  </View>
+                </Modal>
               </View>
               {/* Subtitles */}
               <View style={styles.section}>
-                <Typography variant="subtitle" weight="semibold" style={styles.sectionTitle}>
-                  Субтитры
-                </Typography>
-                <Typography variant="caption" style={{ color: theme.colors.textSecondary, marginBottom: 8 }}>
-                  Укажите тайм-коды (секунды) и тексты для английской и русской дорожки.
-                </Typography>
-                {captionRows.map((row, index) => (
+                <View style={styles.sectionHeader}>
+                  <Typography variant="subtitle" weight="semibold" style={styles.sectionTitle}>
+                    Субтитры
+                  </Typography>
+                  <TouchableOpacity
+                    style={[
+                      styles.editButton,
+                      { backgroundColor: showSubtitlesEditor ? theme.colors.primary : 'rgba(255, 255, 255, 0.1)' }
+                    ]}
+                    onPress={() => setShowSubtitlesEditor(!showSubtitlesEditor)}
+                    activeOpacity={0.7}
+                  >
+                    <Ionicons
+                      name={showSubtitlesEditor ? "chevron-up" : "create-outline"}
+                      size={20}
+                      color={showSubtitlesEditor ? "#FFFFFF" : theme.colors.text}
+                    />
+                    <Typography
+                      variant="body"
+                      style={{ color: showSubtitlesEditor ? "#FFFFFF" : theme.colors.text }}
+                      enableWordLookup={false}
+                    >
+                      {showSubtitlesEditor ? "Скрыть" : "Редактировать"}
+                    </Typography>
+                  </TouchableOpacity>
+                </View>
+
+                {showSubtitlesEditor && (
+                  <>
+                    <Typography variant="caption" style={{ color: theme.colors.textSecondary, marginBottom: 8 }}>
+                      Укажите тайм-коды (секунды) и тексты для английской и русской дорожки.
+                    </Typography>
+                    {captionRows.map((row, index) => (
                   <View
                     key={row.id}
                     style={[
@@ -702,25 +920,53 @@ const saveTopics = useCallback(() => {
                     Добавить фрагмент
                   </Typography>
                 </TouchableOpacity>
-                <ActionButton
-                  label="Сохранить субтитры"
-                  variant="primary"
-                  loading={pendingKey === 'captions'}
-                  onPress={saveCaptions}
-                />
-                {lastSavedKey === 'captions' && (
-                  <Typography variant="caption" style={styles.successLabel}>
-                    Сохранено
-                  </Typography>
+                    <ActionButton
+                      label="Сохранить субтитры"
+                      variant="primary"
+                      loading={pendingKey === 'captions'}
+                      onPress={saveCaptions}
+                    />
+                    {lastSavedKey === 'captions' && (
+                      <Typography variant="caption" style={styles.successLabel}>
+                        Сохранено
+                      </Typography>
+                    )}
+                  </>
                 )}
               </View>
 
               {/* Exercises */}
               <View style={styles.section}>
-                <Typography variant="subtitle" weight="semibold" style={styles.sectionTitle}>
-                  Упражнения
-                </Typography>
-                {exercises.map((exercise, index) => (
+                <View style={styles.sectionHeader}>
+                  <Typography variant="subtitle" weight="semibold" style={styles.sectionTitle}>
+                    Упражнения
+                  </Typography>
+                  <TouchableOpacity
+                    style={[
+                      styles.editButton,
+                      { backgroundColor: showExercisesEditor ? theme.colors.primary : 'rgba(255, 255, 255, 0.1)' }
+                    ]}
+                    onPress={() => setShowExercisesEditor(!showExercisesEditor)}
+                    activeOpacity={0.7}
+                  >
+                    <Ionicons
+                      name={showExercisesEditor ? "chevron-up" : "create-outline"}
+                      size={20}
+                      color={showExercisesEditor ? "#FFFFFF" : theme.colors.text}
+                    />
+                    <Typography
+                      variant="body"
+                      style={{ color: showExercisesEditor ? "#FFFFFF" : theme.colors.text }}
+                      enableWordLookup={false}
+                    >
+                      {showExercisesEditor ? "Скрыть" : "Редактировать"}
+                    </Typography>
+                  </TouchableOpacity>
+                </View>
+
+                {showExercisesEditor && (
+                  <>
+                    {exercises.map((exercise, index) => (
                   <View
                     key={exercise.id}
                     style={[
@@ -858,16 +1104,18 @@ const saveTopics = useCallback(() => {
                     Добавить упражнение
                   </Typography>
                 </TouchableOpacity>
-                <ActionButton
-                  label="Сохранить упражнения"
-                  variant="primary"
-                  loading={pendingKey === 'exercises'}
-                  onPress={saveExercises}
-                />
-                {lastSavedKey === 'exercises' && (
-                  <Typography variant="caption" style={styles.successLabel}>
-                    Сохранено
-                  </Typography>
+                    <ActionButton
+                      label="Сохранить упражнения"
+                      variant="primary"
+                      loading={pendingKey === 'exercises'}
+                      onPress={saveExercises}
+                    />
+                    {lastSavedKey === 'exercises' && (
+                      <Typography variant="caption" style={styles.successLabel}>
+                        Сохранено
+                      </Typography>
+                    )}
+                  </>
                 )}
               </View>
 
@@ -1286,6 +1534,131 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: 20,
+  },
+  compactSection: {
+    gap: 8,
+  },
+  sectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 12,
+  },
+  editButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 12,
+    borderWidth: 0,
+  },
+  compactRow: {
+    flexDirection: 'row',
+    gap: 8,
+    alignItems: 'center',
+  },
+  compactDropdown: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    borderRadius: 12,
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    borderWidth: 0,
+  },
+  saveIconButton: {
+    width: 48,
+    height: 48,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  modalContainer: {
+    width: '80%',
+    maxWidth: 320,
+    maxHeight: '60%',
+  },
+  dropdownContent: {
+    borderRadius: 12,
+    elevation: 8,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    overflow: 'hidden',
+  },
+  option: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    borderBottomWidth: 1,
+  },
+  optionText: {
+    flex: 1,
+    fontSize: 15,
+  },
+  tagsContainer: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    alignItems: 'center',
+  },
+  tagChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 20,
+    borderWidth: 0,
+  },
+  addTagButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 0,
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+  },
+  tagsModalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'flex-end',
+  },
+  tagsModalContent: {
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    paddingTop: 20,
+    paddingHorizontal: 20,
+    maxHeight: '80%',
+  },
+  tagsModalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 16,
+  },
+  tagsModalScroll: {
+    maxHeight: '70%',
+  },
+  confirmButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingVertical: 14,
+    borderRadius: 12,
+    marginTop: 16,
   },
 });
 

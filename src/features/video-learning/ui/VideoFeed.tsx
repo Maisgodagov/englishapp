@@ -35,7 +35,6 @@ import {
 } from "../model/videoLearningSlice";
 import { VideoFeedItem } from "./VideoFeedItem";
 import { ExerciseOverlay } from "./ExerciseOverlay";
-import { VideoSettingsModal } from "./VideoSettingsModal";
 import { VideoModerationModal } from "./VideoModerationModal";
 import { FilterRelaxationBanner } from "./FilterRelaxationBanner";
 import type {
@@ -100,7 +99,6 @@ export const VideoFeed = ({
   const flatListRef = useRef<FlatList<FeedItem>>(null);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [showBlockMessage, setShowBlockMessage] = useState(false);
-  const [showSettings, setShowSettings] = useState(false);
   const [showModeration, setShowModeration] = useState(false);
   const [activeVideoIndex, setActiveVideoIndex] = useState(0);
   const currentIndexRef = useRef(0);
@@ -534,6 +532,7 @@ export const VideoFeed = ({
             isTabFocused={isTabFocused}
             shouldPrefetch={shouldPrefetch}
             prefetchCancelled={prefetchCancelledRef.current}
+            onOpenModeration={isActive ? () => setShowModeration(true) : undefined}
           />
         );
       }
@@ -611,29 +610,6 @@ export const VideoFeed = ({
 
   return (
     <View style={styles.container}>
-      <View style={[styles.settingsButton, { top: insets.top }]}>
-        {isAdmin && currentVideo && (
-          <TouchableOpacity
-            onPress={() => setShowModeration(true)}
-            style={styles.headerIconButton}
-            activeOpacity={0.85}
-          >
-            <Ionicons
-              name="create-outline"
-              size={22}
-              color={currentVideo.isModerated ? '#4CAF50' : '#EF4444'}
-            />
-          </TouchableOpacity>
-        )}
-        <TouchableOpacity
-          onPress={() => setShowSettings(true)}
-          style={styles.headerIconButton}
-          activeOpacity={0.85}
-        >
-          <Ionicons name="ellipsis-vertical" size={24} color="#fff" />
-        </TouchableOpacity>
-      </View>
-
       <FlatList
         ref={flatListRef}
         data={feedItems}
@@ -683,12 +659,6 @@ export const VideoFeed = ({
         </View>
       </Modal>
 
-      {/* Settings modal */}
-      <VideoSettingsModal
-        visible={showSettings}
-        onClose={() => setShowSettings(false)}
-      />
-
       {isAdmin && (
         <VideoModerationModal
           visible={showModeration}
@@ -715,22 +685,6 @@ const styles = StyleSheet.create({
     display: "flex",
     justifyContent: "flex-end",
     alignItems: "flex-end",
-  },
-  settingsButton: {
-    zIndex: 100,
-    flexDirection: "row",
-    alignItems: "center",
-  },
-  moderationAction: {
-    flexDirection: "row",
-    alignItems: "center",
-    marginRight: 8,
-  },
-  headerIconButton: {
-    width: 44,
-    height: 44,
-    alignItems: "center",
-    justifyContent: "center",
   },
   moderationBadge: {
     position: "absolute",
