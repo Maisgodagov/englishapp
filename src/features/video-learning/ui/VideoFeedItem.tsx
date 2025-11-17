@@ -10,12 +10,19 @@ import {
   View,
   PanResponder,
 } from "react-native";
+import Reanimated, {
+  useSharedValue,
+  useAnimatedStyle,
+  withTiming,
+  Easing as ReanimatedEasing,
+} from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Video, {
   OnLoadData,
   OnProgressData,
   OnBufferData,
   OnBandwidthUpdateData,
+  VideoRef,
 } from "react-native-video";
 import { Ionicons } from "@expo/vector-icons";
 
@@ -27,6 +34,9 @@ import {
 } from "../model/videoSettingsSlice";
 import { selectGlobalVolume } from "../model/volumeSettingsSlice";
 import type {
+  AnalysisResult,
+  Exercise,
+  SubmitAnswerPayload,
   TranscriptChunk,
   VideoContent,
 } from "../api/videoLearningApi";
@@ -35,26 +45,59 @@ import {
   getContentHeight,
   getVideoFeedHeight,
 } from "@shared/utils/dimensions";
-import {
-  resetVideoDataUsage,
-  useVideoDataUsage,
-} from "../model/videoDataUsageStore";
-import { useVideoDataUsageTracker } from "../model/videoDataUsageTracker";
-import { VideoFiltersBar } from "./VideoFiltersBar";
-import { ViewModeToggle } from "./ViewModeToggle";
-import { SubtitleToggles } from "./SubtitleToggles";
+
 import { ModerationFilterButton } from "./ModerationFilterButton";
 import { videoModerationApi } from "../api/videoModerationApi";
 import { SubtitleChunkEditor } from "./SubtitleChunkEditor";
-import { selectIsAdmin, selectUserProfile } from "@entities/user/model/selectors";
+import { ExerciseOverlay } from "./ExerciseOverlay";
+import {
+  selectIsAdmin,
+  selectUserProfile,
+} from "@entities/user/model/selectors";
 
+// задержка обработки тапа, чтобы отличать даблтап лайка от паузы/плэй
 const DOUBLE_TAP_DELAY = 250;
 
-// Helper function to format time as MM:SS
+const DRAWER_ANIMATION_CONFIG = {
+  duration: 200,
+  easing: ReanimatedEasing.inOut(ReanimatedEasing.ease),
+};
+
+// форматируем время
 const formatTime = (seconds: number): string => {
   const mins = Math.floor(seconds / 60);
   const secs = Math.floor(seconds % 60);
   return `${mins}:${secs.toString().padStart(2, "0")}`;
+};
+
+// форматируем уровень CEFR
+const formatCEFRLevel = (level: string): string => {
+  switch (level) {
+    case "A1":
+      return `Легкий уровень - ${level}`;
+    case "A2":
+    case "B1":
+      return `Средний уровень - ${level}`;
+    case "B2":
+    case "C1":
+      return `Высокий уровень - ${level}`;
+    default:
+      return level;
+  }
+};
+
+// форматируем скорость речи
+const formatSpeechSpeed = (speed: string): string => {
+  switch (speed) {
+    case "slow":
+      return "Медленная речь";
+    case "normal":
+      return "Обычная скорость речи";
+    case "fast":
+      return "Быстрая речь";
+    default:
+      return speed;
+  }
 };
 
 interface VideoFeedItemProps {
@@ -65,8 +108,15 @@ interface VideoFeedItemProps {
   isLikePending: boolean;
   isTabFocused: boolean;
   shouldPrefetch?: boolean;
+  analysis: AnalysisResult;
   prefetchCancelled?: boolean;
   onOpenModeration?: () => void;
+  onOpenSettings: () => void;
+  exercises: Exercise[];
+  onSubmitExercises: (answers: SubmitAnswerPayload[]) => void;
+  submitStatus: "idle" | "submitting" | "succeeded" | "failed";
+  exerciseSubmission?: { completed: boolean; correct: number; total: number };
+  onDrawerStateChange?: (isOpen: boolean) => void;
 }
 
 const VideoFeedItemComponent = ({
@@ -76,12 +126,18 @@ const VideoFeedItemComponent = ({
   onToggleLike,
   isLikePending,
   isTabFocused,
+  analysis,
   shouldPrefetch = false,
   prefetchCancelled = false,
   onOpenModeration,
+  onOpenSettings,
+  exercises,
+  onSubmitExercises,
+  submitStatus,
+  exerciseSubmission,
+  onDrawerStateChange,
 }: VideoFeedItemProps) => {
   const insets = useSafeAreaInsets();
-  const pauseIconAnim = useRef(new Animated.Value(0)).current;
   const doubleTapAnim = useRef(new Animated.Value(0)).current;
   const lastTapRef = useRef<number>(0);
   const singleTapTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(
@@ -89,13 +145,11 @@ const VideoFeedItemComponent = ({
   );
   const isSeekingRef = useRef(false);
 
-  // Full height for container (to match FlatList item height)
   const CONTAINER_HEIGHT = useMemo(
     () => getContentHeight(insets.top, insets.bottom),
     [insets.top, insets.bottom]
   );
 
-  // Video height excluding tab bar
   const VIDEO_HEIGHT = useMemo(
     () => getVideoFeedHeight(insets.top, insets.bottom),
     [insets.top, insets.bottom]
@@ -109,36 +163,127 @@ const VideoFeedItemComponent = ({
   const [isVideoReady, setIsVideoReady] = useState(false);
   const [hasError, setHasError] = useState(false);
 
-  // Optimistic like state for instant UI update
+  // Oптимистичное отображение лайка
   const [optimisticLike, setOptimisticLike] = useState<boolean | null>(null);
   const [optimisticLikeCount, setOptimisticLikeCount] = useState<number | null>(
     null
   );
 
   const shouldLoad = isActive && isTabFocused;
-  const totalUsageBytes = useVideoDataUsage();
-  const videoRef = useRef<Video>(null);
+  const videoRef = useRef<VideoRef>(null);
+  const [isExerciseDrawerOpen, setExerciseDrawerOpen] = useState(false);
+  const [isExerciseDrawerMounted, setExerciseDrawerMounted] = useState(false);
+  const exerciseDrawerAnim = useRef(new Animated.Value(0)).current;
+  const exerciseDrawerProgress = useSharedValue(0);
+  const hasExercises = exercises.length > 0;
 
-  // Use optimistic state if available, otherwise use actual content state
+  const drawerPanResponder = useRef(
+    PanResponder.create({
+      onMoveShouldSetPanResponder: (_, gestureState) => {
+        return Math.abs(gestureState.dy) > 5 && gestureState.dy > 0;
+      },
+      onPanResponderMove: (_, gestureState) => {
+        if (gestureState.dy > 0 && isExerciseDrawerOpen) {
+          const progress = Math.max(0, Math.min(1, 1 - gestureState.dy / 200));
+          exerciseDrawerAnim.setValue(progress);
+        }
+      },
+      onPanResponderRelease: (_, gestureState) => {
+        if (gestureState.dy > 100) {
+          closeExerciseDrawer();
+        } else {
+          Animated.spring(exerciseDrawerAnim, {
+            toValue: 1,
+            useNativeDriver: false,
+            friction: 8,
+            tension: 65,
+          }).start();
+        }
+      },
+    })
+  ).current;
+
+  const drawerHeight = useMemo(
+    () => CONTAINER_HEIGHT * 0.5,
+    [CONTAINER_HEIGHT]
+  );
+  const exerciseOverlayHeight = useMemo(
+    () => Math.max(drawerHeight - 80 - insets.bottom, 200),
+    [drawerHeight, insets.bottom]
+  );
+
+  // Расчитваем доступное место для видео при открытой модалке упражнений
+  const availableVideoSpace = useMemo(() => {
+    const spaceFromScreenTop = CONTAINER_HEIGHT - drawerHeight;
+    return spaceFromScreenTop - (insets.top + 2);
+  }, [CONTAINER_HEIGHT, drawerHeight, insets.top]);
+
+  const targetVideoScale = useMemo(() => {
+    const clippedVideoHeight = VIDEO_HEIGHT - 120;
+    return availableVideoSpace / clippedVideoHeight;
+  }, [availableVideoSpace, VIDEO_HEIGHT]);
+
+  // TODO: проверить и найти способ отказаться от этого
+  const drawerTranslateY = exerciseDrawerAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: [drawerHeight + insets.bottom, 0],
+  });
+  const drawerOverlayOpacity = exerciseDrawerAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: [0, 0],
+  });
+
+  // обрезаем и уменьшаем видео при открытых упражнениях
+  const videoContainerStyle = useAnimatedStyle(() => {
+    "worklet";
+    const progress = exerciseDrawerProgress.value;
+    const clippedHeight = VIDEO_HEIGHT - progress * 120;
+    const scale = 1 + progress * (targetVideoScale - 1);
+    const scaledHeight = clippedHeight * scale;
+    const heightDifference = clippedHeight - scaledHeight;
+    const translateY = progress * (-heightDifference / 2);
+
+    return {
+      position: "absolute",
+      top: insets.top + 2,
+      left: 0,
+      right: 0,
+      height: clippedHeight,
+      transform: [{ translateY }, { scale }],
+      borderRadius: progress * 32,
+      overflow: "hidden",
+      backgroundColor: "#000",
+    };
+  });
+
+  const videoInnerStyle = useAnimatedStyle(() => {
+    "worklet";
+    const progress = exerciseDrawerProgress.value;
+    const clipTop = progress * 50;
+
+    return {
+      marginTop: -clipTop,
+    };
+  });
+
+  // синхронизируем анимации
+  useEffect(() => {
+    if (isExerciseDrawerOpen) {
+      exerciseDrawerProgress.value = withTiming(1, DRAWER_ANIMATION_CONFIG);
+    } else {
+      exerciseDrawerProgress.value = withTiming(0, DRAWER_ANIMATION_CONFIG);
+    }
+  }, [isExerciseDrawerOpen, exerciseDrawerProgress]);
+
   const displayIsLiked =
     optimisticLike !== null ? optimisticLike : content.isLiked;
   const displayLikesCount =
     optimisticLikeCount !== null ? optimisticLikeCount : content.likesCount;
 
-  // Data usage tracker - monitors bandwidth and calculates traffic
-  const dataUsageTracker = useVideoDataUsageTracker({
-    enabled: shouldLoad,
-    contentId: content.id,
-  });
-
-  // CRITICAL: Memoize video source to prevent recreation on every render
-  // Creating new object reference causes Video component to reload
   const videoSource = useMemo(
     () => ({ uri: content.videoUrl }),
     [content.videoUrl]
   );
-
-  // CRITICAL: Memoize bufferConfig to prevent Video component recreation
   const bufferConfig = useMemo(
     () => ({
       minBufferMs: 2000,
@@ -148,9 +293,6 @@ const VideoFeedItemComponent = ({
     }),
     []
   );
-
-  // CRITICAL: Memoize video style to prevent recreation
-  // Use full available height for vertical videos (like TikTok/Reels)
   const videoStyle = useMemo(
     () => [
       styles.video,
@@ -162,19 +304,61 @@ const VideoFeedItemComponent = ({
     [VIDEO_HEIGHT]
   );
 
+  const openExerciseDrawer = useCallback(() => {
+    if (!hasExercises) {
+      Alert.alert("Нет доступных упражнений для этого видео");
+      return;
+    }
+    if (isExerciseDrawerOpen) return;
+    setExerciseDrawerMounted(true);
+    setExerciseDrawerOpen(true);
+    onDrawerStateChange?.(true);
+    Animated.spring(exerciseDrawerAnim, {
+      toValue: 1,
+      useNativeDriver: true,
+      friction: 9,
+      tension: 45,
+    }).start();
+  }, [
+    exerciseDrawerAnim,
+    hasExercises,
+    isExerciseDrawerOpen,
+    onDrawerStateChange,
+  ]);
+
+  const closeExerciseDrawer = useCallback(() => {
+    if (!isExerciseDrawerMounted) return;
+    Animated.timing(exerciseDrawerAnim, {
+      toValue: 0,
+      duration: 220,
+      useNativeDriver: true,
+    }).start(() => {
+      setExerciseDrawerOpen(false);
+      setExerciseDrawerMounted(false);
+      onDrawerStateChange?.(false);
+    });
+  }, [exerciseDrawerAnim, isExerciseDrawerMounted, onDrawerStateChange]);
+
+  const handleExerciseButtonPress = useCallback(() => {
+    if (isExerciseDrawerOpen) {
+      closeExerciseDrawer();
+      return;
+    }
+    openExerciseDrawer();
+  }, [closeExerciseDrawer, openExerciseDrawer, isExerciseDrawerOpen]);
+
   const updateIsSeeking = useCallback((value: boolean) => {
     isSeekingRef.current = value;
     setIsSeeking(value);
   }, []);
 
-  // Get subtitle settings
+  // субтитры
   const showEnglishSubtitles = useAppSelector(selectShowEnglishSubtitles);
   const showRussianSubtitles = useAppSelector(selectShowRussianSubtitles);
 
-  // Get volume settings
   const globalVolume = useAppSelector(selectGlobalVolume);
 
-  // Check if user is admin
+  // Роли
   const isAdmin = useAppSelector(selectIsAdmin);
   const profile = useAppSelector(selectUserProfile);
 
@@ -184,6 +368,12 @@ const VideoFeedItemComponent = ({
   const [translationChunks, setTranslationChunks] = useState<TranscriptChunk[]>(
     () => content.translation?.chunks ?? []
   );
+
+  useEffect(() => {
+    setTranscriptChunks(content.transcription?.chunks ?? []);
+    setTranslationChunks(content.translation?.chunks ?? []);
+  }, [content.id, content.transcription?.chunks, content.translation?.chunks]);
+
   const [subtitleEditorState, setSubtitleEditorState] = useState<{
     chunkIndex: number;
     englishText: string;
@@ -193,11 +383,6 @@ const VideoFeedItemComponent = ({
   } | null>(null);
   const [isSavingSubtitle, setIsSavingSubtitle] = useState(false);
   const wasPlayingBeforeEditorRef = useRef(false);
-
-  useEffect(() => {
-    setTranscriptChunks(content.transcription?.chunks ?? []);
-    setTranslationChunks(content.translation?.chunks ?? []);
-  }, [content.id, content.transcription, content.translation]);
 
   const resumePlaybackAfterEditor = useCallback(() => {
     if (wasPlayingBeforeEditorRef.current && shouldLoad) {
@@ -254,7 +439,8 @@ const VideoFeedItemComponent = ({
       englishText: activeTranscript.text,
       russianText: activeTranslation?.text ?? "",
       englishTimestamp: activeTranscript.timestamp,
-      russianTimestamp: activeTranslation?.timestamp ?? activeTranscript.timestamp,
+      russianTimestamp:
+        activeTranslation?.timestamp ?? activeTranscript.timestamp,
     });
   }, [
     isAdmin,
@@ -287,15 +473,18 @@ const VideoFeedItemComponent = ({
       return;
     }
     if (!profile) {
-      Alert.alert("Error", "Unable to edit subtitles: missing user data.");
+      Alert.alert(
+        "Ошибка",
+        "Не удалось изменить субтитры: отсутствут данные пользователя."
+      );
       return;
     }
     const englishText = subtitleEditorState.englishText.trim();
     const russianText = subtitleEditorState.russianText.trim();
     if (!englishText || !russianText) {
       Alert.alert(
-        "Error",
-        "Both English and Russian subtitle texts must be filled in."
+        "Ошибка",
+        "И английские и русские субтитры должны быть заполнены"
       );
       return;
     }
@@ -323,93 +512,58 @@ const VideoFeedItemComponent = ({
       setSubtitleEditorState(null);
       resumePlaybackAfterEditor();
     } catch (error) {
-      console.error("[VideoFeedItem] Failed to update subtitle chunk", error);
+      console.error("Не удалось обновить субтитры", error);
       Alert.alert(
-        "Error",
-        "Failed to save subtitle changes. Please try again."
+        "Ошибка",
+        "Не удалось сохранить субтитры. Пожалуйста, попробуйте еще раз."
       );
     } finally {
       setIsSavingSubtitle(false);
     }
-  }, [
-    subtitleEditorState,
-    profile,
-    content.id,
-    resumePlaybackAfterEditor,
-  ]);
+  }, [subtitleEditorState, profile, content.id, resumePlaybackAfterEditor]);
 
-  // Reset video state when content changes
+  // Ресет состояния
   useEffect(() => {
     isSeekingRef.current = false;
     setCurrentTime(0);
     setDuration(0);
-    setIsBuffering(true);
-    setIsVideoReady(false); // Reset video ready state
+    setIsBuffering(shouldLoad);
+    setIsVideoReady(false);
     updateIsSeeking(false);
     setIsPlaying(shouldLoad);
   }, [content.id, shouldLoad, updateIsSeeking]);
 
   useEffect(() => {
-    if (shouldLoad) {
-      setIsBuffering(true);
-      setIsPlaying(true);
-    } else {
-      setIsPlaying(false);
+    if (isExerciseDrawerMounted && (!isActive || !hasExercises)) {
+      exerciseDrawerAnim.stopAnimation();
+      exerciseDrawerAnim.setValue(0);
+      setExerciseDrawerMounted(false);
+      setExerciseDrawerOpen(false);
     }
-  }, [shouldLoad, content.id]);
+  }, [isActive, hasExercises, isExerciseDrawerMounted, exerciseDrawerAnim]);
 
-  // Reset optimistic state when server response arrives
   useEffect(() => {
-    // Clear optimistic state when actual data arrives
     if (optimisticLike !== null && optimisticLike === content.isLiked) {
       setOptimisticLike(null);
       setOptimisticLikeCount(null);
     }
   }, [content.isLiked, content.likesCount, content.id, optimisticLike]);
 
-  const formattedUsage = useMemo(() => {
-    const bytes = totalUsageBytes;
-    if (bytes <= 0) {
-      return "0 KB";
-    }
-    const megabytes = bytes / (1024 * 1024);
-    if (megabytes >= 1) {
-      return `${megabytes.toFixed(2)} MB`;
-    }
-    const kilobytes = bytes / 1024;
-    return `${kilobytes.toFixed(1)} KB`;
-  }, [totalUsageBytes]);
-
-  const handleResetUsage = useCallback(() => {
-    resetVideoDataUsage();
+  const handleVideoLoad = useCallback((data: OnLoadData) => {
+    setDuration(data.duration);
+    setIsBuffering(false);
+    setIsVideoReady(true);
   }, []);
 
-  // CRITICAL: Memoize all video event handlers to prevent Video recreation
-  const handleVideoLoad = useCallback(
-    (data: OnLoadData) => {
-      setDuration(data.duration);
-      setIsBuffering(false);
-      setIsVideoReady(true); // Mark video as ready to prevent flickering
-      dataUsageTracker.handleLoad(data);
-    },
-    [dataUsageTracker]
-  );
-
-  const handleVideoProgress = useCallback(
-    (data: OnProgressData) => {
-      if (!isSeekingRef.current) {
-        setCurrentTime(data.currentTime);
-      }
-      dataUsageTracker.handleProgress(data);
-    },
-    [dataUsageTracker]
-  );
+  const handleVideoProgress = useCallback((data: OnProgressData) => {
+    if (!isSeekingRef.current) {
+      setCurrentTime(data.currentTime);
+    }
+  }, []);
 
   const handleVideoBandwidthUpdate = useCallback(
-    (data: OnBandwidthUpdateData) => {
-      dataUsageTracker.handleBandwidthUpdate(data);
-    },
-    [dataUsageTracker]
+    (data: OnBandwidthUpdateData) => {},
+    []
   );
 
   const handleVideoBuffer = useCallback((data: OnBufferData) => {
@@ -418,7 +572,7 @@ const VideoFeedItemComponent = ({
 
   const handleVideoError = useCallback(
     (error: any) => {
-      console.error(`[VideoFeedItem ${content.id}] ❌ Video error:`, error);
+      console.error(`Видео ${content.id}. Ошибка:`, error);
       setHasError(true);
       setIsVideoReady(false);
     },
@@ -431,8 +585,6 @@ const VideoFeedItemComponent = ({
     setCurrentTime(0);
   }, []);
 
-  // No polling needed - react-native-video provides callbacks
-
   useEffect(
     () => () => {
       if (singleTapTimeoutRef.current) {
@@ -444,24 +596,8 @@ const VideoFeedItemComponent = ({
 
   const togglePlayback = useCallback(() => {
     setIsPlaying((prev) => !prev);
+  }, []);
 
-    // Show pause/play icon animation
-    Animated.sequence([
-      Animated.timing(pauseIconAnim, {
-        toValue: 1,
-        duration: 150,
-        useNativeDriver: true,
-      }),
-      Animated.delay(500),
-      Animated.timing(pauseIconAnim, {
-        toValue: 0,
-        duration: 150,
-        useNativeDriver: true,
-      }),
-    ]).start();
-  }, [pauseIconAnim]);
-
-  // Single tap to pause/play
   const showDoubleTapLike = useCallback(() => {
     Animated.sequence([
       Animated.timing(doubleTapAnim, {
@@ -480,17 +616,10 @@ const VideoFeedItemComponent = ({
 
   const handleDoubleTap = useCallback(() => {
     if (isLikePending) return;
-
-    // Use displayIsLiked for current state
     const nextLike = !displayIsLiked;
-
-    // Optimistic update - instant UI feedback
     setOptimisticLike(nextLike);
     setOptimisticLikeCount(displayLikesCount + (nextLike ? 1 : -1));
-
-    // Send to server
     onToggleLike(content.id, nextLike);
-
     if (nextLike) {
       showDoubleTapLike();
     }
@@ -535,11 +664,9 @@ const VideoFeedItemComponent = ({
 
     const nextLike = !displayIsLiked;
 
-    // Optimistic update - instant UI feedback
     setOptimisticLike(nextLike);
     setOptimisticLikeCount(displayLikesCount + (nextLike ? 1 : -1));
 
-    // Send to server
     onToggleLike(content.id, nextLike);
   }, [
     content.id,
@@ -551,7 +678,6 @@ const VideoFeedItemComponent = ({
 
   const progress = duration > 0 ? currentTime / duration : 0;
 
-  // Seek to position
   const seekToPosition = useCallback(
     (position: number) => {
       if (!videoRef.current || duration === 0) return;
@@ -561,8 +687,7 @@ const VideoFeedItemComponent = ({
     },
     [duration]
   );
-
-  // PanResponder for progress bar scrubbing
+  // Перемотка (рассмотреть более оптимальные варианты чтоб отказаться от кастома)
   const panResponder = useMemo(
     () =>
       PanResponder.create({
@@ -570,19 +695,16 @@ const VideoFeedItemComponent = ({
         onMoveShouldSetPanResponder: () => true,
         onPanResponderGrant: (evt) => {
           updateIsSeeking(true);
-          // Use initial touch position for immediate seeking
           const touchX = evt.nativeEvent.locationX;
           const position = Math.max(0, Math.min(1, touchX / SCREEN_WIDTH));
           setCurrentTime(position * duration);
         },
         onPanResponderMove: (evt) => {
-          // Use absolute position (x0 + dx) instead of moveX
           const touchX = evt.nativeEvent.pageX;
           const position = Math.max(0, Math.min(1, touchX / SCREEN_WIDTH));
           setCurrentTime(position * duration);
         },
         onPanResponderRelease: (evt) => {
-          // Use absolute position for final seek
           const touchX = evt.nativeEvent.pageX;
           const position = Math.max(0, Math.min(1, touchX / SCREEN_WIDTH));
           seekToPosition(position);
@@ -592,18 +714,10 @@ const VideoFeedItemComponent = ({
     [duration, seekToPosition, updateIsSeeking]
   );
 
-  // Set volume
-  // Playback is now controlled directly via Video component props (paused, volume)
-  // No manual play/pause needed
-
   return (
-    <>
-      <View style={[styles.container, { height: CONTAINER_HEIGHT }]}>
-      {/* Filters bar at the top */}
-      {isActive && <VideoFiltersBar />}
-
-      {/* Admin controls on the left */}
-      {isActive && isAdmin && (
+    <View style={[styles.container, { height: CONTAINER_HEIGHT }]}>
+      {/* админ управление (панель слева) */}
+      {isActive && isAdmin && !isExerciseDrawerOpen && (
         <View style={styles.leftControlsWrapper}>
           <ModerationFilterButton />
           {onOpenModeration && (
@@ -625,171 +739,212 @@ const VideoFeedItemComponent = ({
         </View>
       )}
 
-      {/* Like button and controls on the right */}
-      <View style={styles.rightControlsWrapper}>
-        <TouchableOpacity
-          onPress={handleLikePress}
-          activeOpacity={0.7}
-          style={styles.likeButton}
-        >
-          <Ionicons
-            name={displayIsLiked ? "heart" : "heart-outline"}
-            size={44}
-            color={displayIsLiked ? "#E11D48" : "#FFFFFF"}
-          />
-        </TouchableOpacity>
-        <Typography
-          variant="body"
-          style={[
-            styles.likeCount,
-            displayIsLiked ? styles.likeCountActive : undefined,
-          ]}
-          enableWordLookup={false}
-        >
-          {displayLikesCount}
-        </Typography>
-
-        {/* All controls in one column */}
-        {isActive && (
-          <>
-            <ViewModeToggle />
-            <SubtitleToggles />
-          </>
-        )}
-      </View>
-
-      {/* Video container with black background */}
-      <View style={[styles.videoContainer, { paddingTop: insets.top + 2 }]}>
-        {/* Prefetch video - hidden, paused, only loads when shouldPrefetch is true */}
-        {shouldPrefetch && !prefetchCancelled && !isActive && (
-          <Video
-            source={videoSource}
-            style={{ width: 1, height: 1, opacity: 0 }}
-            paused={true}
-            muted={true}
-            controls={false}
-            maxBitRate={1500000} // Lower quality for prefetch to save bandwidth
-            bufferConfig={{
-              minBufferMs: 3000, // Only buffer first 3 seconds
-              maxBufferMs: 3000,
-              bufferForPlaybackMs: 500,
-              bufferForPlaybackAfterRebufferMs: 1000,
-            }}
-          />
-        )}
-
-        {shouldLoad ? (
-          <>
-            <Video
-              ref={videoRef}
-              source={videoSource}
-              style={[
-                videoStyle,
-                !isVideoReady && { opacity: 0 }, // Hide until ready to prevent flickering
-              ]} // OPTIMIZATION: Use memoized style to prevent recreation
-              resizeMode="cover"
-              repeat={true} // Loop videos continuously
-              paused={!isPlaying || !isActive || !isTabFocused}
-              volume={globalVolume}
-              muted={false}
-              playInBackground={false}
-              playWhenInactive={false}
-              controls={false} // Disable native video controls
-              maxBitRate={2000000} // Limit to 2 Mbps (~720p) to save bandwidth
-              onLoad={handleVideoLoad} // OPTIMIZATION: Use memoized handler to prevent Video recreation
-              onProgress={handleVideoProgress} // OPTIMIZATION: Use memoized handler
-              onBandwidthUpdate={handleVideoBandwidthUpdate} // OPTIMIZATION: Use memoized handler
-              onBuffer={handleVideoBuffer} // OPTIMIZATION: Use memoized handler
-              onError={handleVideoError} // OPTIMIZATION: Use memoized handler
-              onPlaybackStateChanged={handlePlaybackStateChanged} // OPTIMIZATION: Use memoized handler
-              onEnd={handleVideoEnd} // Reset progress when video loops
-              bufferConfig={bufferConfig} // OPTIMIZATION: Use memoized config to prevent recreation
-              progressUpdateInterval={250} // Update progress bar 4 times per second for smooth animation
-              ignoreSilentSwitch="ignore"
-              mixWithOthers="duck"
+      {/* Панель справа, лайк и кнопка упражнений */}
+      {!isExerciseDrawerOpen && (
+        <View style={styles.rightControlsWrapper}>
+          <TouchableOpacity
+            onPress={handleLikePress}
+            activeOpacity={0.7}
+            style={styles.likeButton}
+          >
+            <Ionicons
+              name={displayIsLiked ? "heart" : "heart-outline"}
+              size={44}
+              color={displayIsLiked ? "#E11D48" : "#FFFFFF"}
             />
-            {/* Black placeholder with spinner while video loads */}
-            {!isVideoReady && !hasError && (
-              <View
-                style={[
-                  styles.video,
-                  {
-                    position: "absolute",
-                    top: 0,
-                    left: 0,
-                    width: SCREEN_WIDTH,
-                    height: VIDEO_HEIGHT,
-                    backgroundColor: "#000",
-                    justifyContent: "center",
-                    alignItems: "center",
-                  },
-                ]}
-              >
-                <ActivityIndicator size="large" color="#FFFFFF" />
-              </View>
-            )}
-
-            {/* Error overlay */}
-            {hasError && (
-              <View
-                style={[
-                  styles.video,
-                  {
-                    position: "absolute",
-                    top: 0,
-                    left: 0,
-                    width: SCREEN_WIDTH,
-                    height: VIDEO_HEIGHT,
-                    backgroundColor: "rgba(0,0,0,0.9)",
-                    justifyContent: "center",
-                    alignItems: "center",
-                    padding: 20,
-                  },
-                ]}
-              >
-                <Ionicons
-                  name="alert-circle-outline"
-                  size={64}
-                  color="#FF6B6B"
-                />
-                <Typography
-                  variant="subtitle"
-                  style={{
-                    color: "#FFFFFF",
-                    marginTop: 16,
-                    textAlign: "center",
-                  }}
-                >
-                  Не удалось загрузить видео
-                </Typography>
-                <Typography
-                  variant="body"
-                  style={{
-                    color: "rgba(255, 255, 255, 0.7)",
-                    marginTop: 8,
-                    textAlign: "center",
-                  }}
-                >
-                  Проверьте подключение к сети
-                </Typography>
-              </View>
-            )}
-          </>
-        ) : (
-          <View
+          </TouchableOpacity>
+          <Typography
+            variant="body"
             style={[
-              styles.video,
-              {
-                width: SCREEN_WIDTH,
-                height: VIDEO_HEIGHT,
-                backgroundColor: "#000",
-              },
+              styles.likeCount,
+              displayIsLiked ? styles.likeCountActive : undefined,
             ]}
-          />
-        )}
+            enableWordLookup={false}
+          >
+            {displayLikesCount}
+          </Typography>
+
+          <TouchableOpacity
+            onPress={handleExerciseButtonPress}
+            activeOpacity={0.85}
+            style={styles.exerciseButton}
+          >
+            <Ionicons
+              name="extension-puzzle-outline"
+              size={42}
+              color="#FFFFFF"
+            />
+          </TouchableOpacity>
+        </View>
+      )}
+
+      {/* Header with tags and settings button */}
+      {isActive && analysis && !isExerciseDrawerOpen && (
+        <View style={[styles.headerContainer, { paddingTop: insets.top + 12 }]}>
+          <View>
+            <View style={styles.tagsContainer}>
+              <View style={styles.tag}>
+                <Typography variant="caption" style={styles.tagText}>
+                  {formatCEFRLevel(analysis.cefrLevel)}
+                </Typography>
+              </View>
+              <View style={styles.tag}>
+                <Typography variant="caption" style={styles.tagText}>
+                  {formatSpeechSpeed(analysis.speechSpeed)}
+                </Typography>
+              </View>
+            </View>
+            {content.author && (
+              <Typography variant="caption" style={styles.headerAuthor}>
+                {content.author}
+              </Typography>
+            )}
+          </View>
+          <TouchableOpacity
+            onPress={onOpenSettings}
+            activeOpacity={0.7}
+            style={styles.headerSettingsButton}
+          >
+            <Ionicons name="options-outline" size={24} color="#FFFFFF" />
+          </TouchableOpacity>
+        </View>
+      )}
+
+      <View
+        style={[
+          styles.videoContainer,
+          {
+            height: CONTAINER_HEIGHT,
+          },
+        ]}
+      >
+        <Reanimated.View style={videoContainerStyle}>
+          {shouldPrefetch && !prefetchCancelled && !isActive && (
+            <Video
+              source={videoSource}
+              style={{ width: 1, height: 1, opacity: 0 }}
+              paused={true}
+              muted={true}
+              controls={false}
+              maxBitRate={1500000}
+              bufferConfig={{
+                minBufferMs: 3000,
+                maxBufferMs: 3000,
+                bufferForPlaybackMs: 500,
+                bufferForPlaybackAfterRebufferMs: 1000,
+              }}
+            />
+          )}
+
+          {shouldLoad ? (
+            <>
+              <Reanimated.View style={videoInnerStyle}>
+                <Video
+                  ref={videoRef}
+                  source={videoSource}
+                  style={[videoStyle, !isVideoReady && { opacity: 0 }]}
+                  resizeMode="cover"
+                  repeat={true}
+                  paused={!isPlaying || !isActive || !isTabFocused}
+                  volume={globalVolume}
+                  muted={false}
+                  playInBackground={false}
+                  playWhenInactive={false}
+                  controls={false}
+                  maxBitRate={2000000}
+                  onLoad={handleVideoLoad}
+                  onProgress={handleVideoProgress}
+                  onBandwidthUpdate={handleVideoBandwidthUpdate}
+                  onBuffer={handleVideoBuffer}
+                  onError={handleVideoError}
+                  onPlaybackStateChanged={handlePlaybackStateChanged}
+                  onEnd={handleVideoEnd}
+                  bufferConfig={bufferConfig}
+                  progressUpdateInterval={250}
+                  ignoreSilentSwitch="ignore"
+                  mixWithOthers="duck"
+                />
+              </Reanimated.View>
+              {!isVideoReady && !hasError && (
+                <View
+                  style={[
+                    styles.video,
+                    {
+                      position: "absolute",
+                      top: 0,
+                      left: 0,
+                      width: SCREEN_WIDTH,
+                      height: VIDEO_HEIGHT,
+                      backgroundColor: "#000",
+                      justifyContent: "center",
+                      alignItems: "center",
+                    },
+                  ]}
+                >
+                  <ActivityIndicator size="large" color="#FFFFFF" />
+                </View>
+              )}
+
+              {hasError && (
+                <View
+                  style={[
+                    styles.video,
+                    {
+                      position: "absolute",
+                      top: 0,
+                      left: 0,
+                      width: SCREEN_WIDTH,
+                      height: VIDEO_HEIGHT,
+                      backgroundColor: "rgba(0,0,0,0.9)",
+                      justifyContent: "center",
+                      alignItems: "center",
+                      padding: 20,
+                    },
+                  ]}
+                >
+                  <Ionicons
+                    name="alert-circle-outline"
+                    size={64}
+                    color="#FF6B6B"
+                  />
+                  <Typography
+                    variant="subtitle"
+                    style={{
+                      color: "#FFFFFF",
+                      marginTop: 16,
+                      textAlign: "center",
+                    }}
+                  >
+                    Не удалось загрузить видео
+                  </Typography>
+                  <Typography
+                    variant="body"
+                    style={{
+                      color: "rgba(255, 255, 255, 0.7)",
+                      marginTop: 8,
+                      textAlign: "center",
+                    }}
+                  >
+                    Проверьте подключение к сети
+                  </Typography>
+                </View>
+              )}
+            </>
+          ) : (
+            <View
+              style={[
+                styles.video,
+                {
+                  width: SCREEN_WIDTH,
+                  height: VIDEO_HEIGHT,
+                  backgroundColor: "#000",
+                },
+              ]}
+            />
+          )}
+        </Reanimated.View>
       </View>
 
-      {/* Buffering indicator - only show when video is buffering AND already loaded (not initial load) */}
       {shouldLoad && isBuffering && !isPlaying && isVideoReady && (
         <View style={styles.bufferingContainer}>
           <View style={styles.bufferingSpinner}>
@@ -818,7 +973,6 @@ const VideoFeedItemComponent = ({
         <Ionicons name="heart" size={96} color="#E11D48" />
       </Animated.View>
 
-      {/* Bottom overlay */}
       <View
         style={[
           styles.bottomGradient,
@@ -826,7 +980,6 @@ const VideoFeedItemComponent = ({
         ]}
         pointerEvents="box-none"
       >
-        {/* Subtitles with reduced transparency */}
         {((showEnglishSubtitles && activeTranscript) ||
           (showRussianSubtitles && activeTranslation)) && (
           <View style={styles.subtitleContainer}>
@@ -870,34 +1023,14 @@ const VideoFeedItemComponent = ({
         )}
       </View>
 
-      {/* Center pause/play animation */}
-      <Animated.View
-        style={[
-          styles.centerIcon,
-          {
-            opacity: pauseIconAnim,
-            transform: [
-              {
-                scale: pauseIconAnim.interpolate({
-                  inputRange: [0, 1],
-                  outputRange: [0.5, 1.1],
-                }),
-              },
-            ],
-          },
-        ]}
-        pointerEvents="none"
-      >
-        <View style={styles.iconBackground}>
-          <Ionicons
-            name={isPlaying ? "pause" : "play"}
-            size={56}
-            color="#FFFFFF"
-          />
+      {!isPlaying && (
+        <View style={styles.centerIcon} pointerEvents="none">
+          <View style={styles.iconBackground}>
+            <Ionicons name="play" size={56} color="#FFFFFF" />
+          </View>
         </View>
-      </Animated.View>
+      )}
 
-      {/* Progress bar with scrubbing */}
       <View style={styles.progressBarContainer} {...panResponder.panHandlers}>
         <View style={styles.progressBar}>
           <View
@@ -918,13 +1051,51 @@ const VideoFeedItemComponent = ({
         )}
       </View>
 
-      {/* Transparent overlay to catch taps */}
       <View style={styles.tapOverlay}>
         <TouchableWithoutFeedback onPress={handleTap}>
           <View style={StyleSheet.absoluteFill} />
         </TouchableWithoutFeedback>
       </View>
-    </View>
+
+      {isExerciseDrawerMounted && (
+        <>
+          <TouchableWithoutFeedback onPress={closeExerciseDrawer}>
+            <Animated.View
+              pointerEvents={isExerciseDrawerOpen ? "auto" : "none"}
+              style={[
+                styles.exerciseDrawerOverlay,
+                { opacity: drawerOverlayOpacity },
+              ]}
+            />
+          </TouchableWithoutFeedback>
+          <Animated.View
+            style={[
+              styles.exerciseDrawer,
+              {
+                height: drawerHeight,
+                paddingBottom: insets.bottom - 5,
+                transform: [{ translateY: drawerTranslateY }],
+              },
+            ]}
+            {...drawerPanResponder.panHandlers}
+          >
+            <View style={styles.exerciseDrawerHandle} />
+            <TouchableOpacity
+              onPress={closeExerciseDrawer}
+              style={styles.drawerCloseButton}
+            >
+              <Ionicons name="close" size={22} color="#FFFFFF" />
+            </TouchableOpacity>
+            <ExerciseOverlay
+              exercises={exercises}
+              onSubmit={onSubmitExercises}
+              submitStatus={submitStatus}
+              lastSubmission={exerciseSubmission}
+              height={exerciseOverlayHeight}
+            />
+          </Animated.View>
+        </>
+      )}
       <SubtitleChunkEditor
         visible={Boolean(subtitleEditorState)}
         englishValue={subtitleEditorState?.englishText ?? ""}
@@ -937,7 +1108,7 @@ const VideoFeedItemComponent = ({
         onSave={handleSaveSubtitleChunk}
         isSaving={isSavingSubtitle}
       />
-    </>
+    </View>
   );
 };
 
@@ -946,6 +1117,48 @@ const styles = StyleSheet.create({
     width: SCREEN_WIDTH,
     backgroundColor: "#000000",
     position: "relative",
+  },
+  headerContainer: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    zIndex: 200,
+  },
+  tagsContainer: {
+    flexDirection: "row",
+    gap: 8,
+  },
+  tag: {
+    backgroundColor: "rgba(0, 0, 0, 0.6)",
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.2)",
+  },
+  tagText: {
+    color: "#FFFFFF",
+    fontSize: 12,
+    fontWeight: "600",
+    textTransform: "uppercase",
+  },
+  headerAuthor: {
+    color: "#FFFFFF",
+    fontSize: 12,
+    fontWeight: "600",
+    marginTop: 6,
+  },
+  headerSettingsButton: {
+    width: 40,
+    height: 40,
+    alignItems: "center",
+    justifyContent: "center",
   },
   leftControlsWrapper: {
     position: "absolute",
@@ -960,7 +1173,7 @@ const styles = StyleSheet.create({
     position: "absolute",
     right: 8,
     top: "50%",
-    transform: [{ translateY: -120 }],
+    transform: [{ translateY: 40 }],
     alignItems: "center",
     zIndex: 100,
     gap: 12,
@@ -987,6 +1200,49 @@ const styles = StyleSheet.create({
   },
   likeCountActive: {
     color: "#E11D48",
+  },
+  exerciseButton: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  exerciseButtonDisabled: {
+    opacity: 0.4,
+  },
+  exerciseButtonActive: {
+    backgroundColor: "rgba(157,255,128,0.25)",
+    borderColor: "#9dff80",
+  },
+  exerciseButtonLabel: {
+    color: "#FFFFFF",
+    fontSize: 12,
+    fontWeight: "600",
+    textAlign: "center",
+  },
+  exerciseBadge: {
+    position: "absolute",
+    top: 4,
+    right: 4,
+    minWidth: 20,
+    paddingHorizontal: 5,
+    paddingVertical: 2,
+    borderRadius: 10,
+    backgroundColor: "#9dff80",
+  },
+  exerciseBadgeLabel: {
+    color: "#051923",
+    fontSize: 10,
+    fontWeight: "700",
+    textAlign: "center",
+  },
+  settingsButton: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    alignItems: "center",
+    justifyContent: "center",
   },
   moderationButton: {
     width: 48,
@@ -1015,11 +1271,9 @@ const styles = StyleSheet.create({
     fontWeight: "600",
   },
   videoContainer: {
-    flex: 1,
     width: "100%",
     backgroundColor: "#000000",
-    alignItems: "center",
-    justifyContent: "center",
+    position: "relative",
   },
   video: {
     marginTop: 2,
@@ -1063,7 +1317,6 @@ const styles = StyleSheet.create({
     justifyContent: "flex-end",
     paddingHorizontal: 20,
   },
-  // Completed Badge - Compact
   completedBadge: {
     position: "absolute",
     top: 100,
@@ -1092,20 +1345,19 @@ const styles = StyleSheet.create({
     fontSize: 10,
     letterSpacing: 0.2,
   },
-  // Subtitles - Less transparent
   subtitleContainer: {
     gap: 12,
-    marginBottom: -50,
+    marginBottom: -40,
     zIndex: 5,
     position: "relative",
   },
   subtitleBox: {
     backgroundColor: "rgba(0, 0, 0, 0.90)",
-    paddingVertical: 18,
-    paddingHorizontal: 24,
-    borderRadius: 20,
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    borderRadius: 12,
     alignSelf: "center",
-    maxWidth: "90%",
+    maxWidth: "95%",
     elevation: 4,
     shadowColor: "#000",
     shadowOffset: { width: 0, height: 2 },
@@ -1163,7 +1415,7 @@ const styles = StyleSheet.create({
   },
   progressBarContainer: {
     position: "absolute",
-    bottom: -8,
+    bottom: 12,
     left: 0,
     right: 0,
     height: 20,
@@ -1211,6 +1463,63 @@ const styles = StyleSheet.create({
   tapOverlay: {
     ...StyleSheet.absoluteFillObject,
     zIndex: 1,
+  },
+  exerciseDrawerOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: "rgba(0,0,0,0.75)",
+    zIndex: 150,
+  },
+  exerciseDrawer: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: "#0A0D16",
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
+    paddingHorizontal: 0,
+    paddingTop: 8,
+    zIndex: 160,
+    overflow: "hidden",
+  },
+  exerciseDrawerHandle: {
+    alignSelf: "center",
+    width: 46,
+    height: 5,
+    borderRadius: 999,
+    backgroundColor: "rgba(255,255,255,0.3)",
+    marginTop: 4,
+    marginBottom: 8,
+  },
+  exerciseDrawerHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 16,
+  },
+  exerciseDrawerTitle: {
+    color: "#FFFFFF",
+    fontSize: 18,
+    fontWeight: "700",
+  },
+  exerciseDrawerSubtitle: {
+    color: "rgba(255,255,255,0.6)",
+    marginTop: 3,
+    marginBottom: 6,
+    paddingHorizontal: 16,
+    fontSize: 13,
+  },
+  drawerCloseButton: {
+    position: "absolute",
+    top: 12,
+    right: 16,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(255,255,255,0.08)",
+    zIndex: 200,
   },
 });
 

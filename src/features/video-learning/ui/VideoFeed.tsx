@@ -7,46 +7,52 @@ import React, {
 } from "react";
 import {
   ActivityIndicator,
-  FlatList,
-  Modal,
   StyleSheet,
-  TouchableOpacity,
   View,
   type NativeScrollEvent,
   type NativeSyntheticEvent,
   type ListRenderItem,
 } from "react-native";
+import Animated from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { useTheme } from "styled-components/native";
-import { Ionicons } from "@expo/vector-icons";
-
 import { Typography } from "@shared/ui";
 import { useAppSelector, useAppDispatch } from "@core/store/hooks";
 import {
-  selectViewMode,
   selectExerciseCount,
+  selectDifficultyLevel,
+  selectSpeechSpeed,
+  selectShowAdultContent,
+  selectShowEnglishSubtitles,
+  selectShowRussianSubtitles,
+  setDifficultyLevel,
+  setSpeechSpeed,
+  setShowAdultContent,
+  setShowEnglishSubtitles,
+  setShowRussianSubtitles,
+  type DifficultyLevel,
+  type SpeechSpeed,
 } from "../model/videoSettingsSlice";
 import {
   loadMoreVideoFeed,
+  fetchVideoFeedWithRelaxation,
   selectHasMoreFeed,
   selectIsLoadingMore,
   selectFilterRelaxationMessage,
   clearFilterRelaxationMessage,
 } from "../model/videoLearningSlice";
 import { VideoFeedItem } from "./VideoFeedItem";
-import { ExerciseOverlay } from "./ExerciseOverlay";
 import { VideoModerationModal } from "./VideoModerationModal";
 import { FilterRelaxationBanner } from "./FilterRelaxationBanner";
 import type {
   VideoContent,
   SubmitAnswerPayload,
 } from "../api/videoLearningApi";
-import { LinearGradient } from "expo-linear-gradient";
 import { getContentHeight } from "@shared/utils/dimensions";
 import { selectIsAdmin } from "@entities/user/model/selectors";
+import { VideoSettingsSheet } from "./VideoSettingsSheet";
 
 interface FeedItem {
-  type: "video" | "exercises";
+  type: "video";
   content: VideoContent;
   index: number;
 }
@@ -86,29 +92,30 @@ export const VideoFeed = ({
   focusVideoId,
   onClearFocus,
 }: VideoFeedProps) => {
-  const theme = useTheme() as any;
   const insets = useSafeAreaInsets();
   const dispatch = useAppDispatch();
-  const viewMode = useAppSelector(selectViewMode);
   const exerciseCount = useAppSelector(selectExerciseCount);
+  const difficultyLevel = useAppSelector(selectDifficultyLevel);
+  const speechSpeedSetting = useAppSelector(selectSpeechSpeed);
+  const showAdultContent = useAppSelector(selectShowAdultContent);
+  const showEnglishSubtitles = useAppSelector(selectShowEnglishSubtitles);
+  const showRussianSubtitles = useAppSelector(selectShowRussianSubtitles);
   const hasMoreFeed = useAppSelector(selectHasMoreFeed);
   const isLoadingMore = useAppSelector(selectIsLoadingMore);
   const filterRelaxationMessage = useAppSelector(selectFilterRelaxationMessage);
   const isAdmin = useAppSelector(selectIsAdmin);
 
-  const flatListRef = useRef<FlatList<FeedItem>>(null);
+  const flatListRef = useRef<Animated.FlatList<FeedItem>>(null);
   const [currentIndex, setCurrentIndex] = useState(0);
-  const [showBlockMessage, setShowBlockMessage] = useState(false);
   const [showModeration, setShowModeration] = useState(false);
-  const [activeVideoIndex, setActiveVideoIndex] = useState(0);
   const currentIndexRef = useRef(0);
-  const blockMessageTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
-    null
-  );
   const lastScrollOffsetRef = useRef(0);
   const loadMoreRequestedRef = useRef(false);
   const previousVideoCountRef = useRef(videos.length);
-  const previousViewModeRef = useRef(viewMode);
+  const [settingsVisible, setSettingsVisible] = useState(false);
+  const handleOpenSettings = useCallback(() => setSettingsVisible(true), []);
+  const handleCloseSettings = useCallback(() => setSettingsVisible(false), []);
+  const [isAnyDrawerOpen, setIsAnyDrawerOpen] = useState(false);
 
   // Prefetch state - track which video index should be prefetched
   const [prefetchVideoIndex, setPrefetchVideoIndex] = useState<number | null>(null);
@@ -121,39 +128,20 @@ export const VideoFeed = ({
   );
 
   // Build feed based on view mode
-  const feedItems: FeedItem[] = useMemo(() => {
-    const items: FeedItem[] = [];
-    videos.forEach((content, index) => {
-      items.push({ type: "video", content, index });
-      // Only add exercises if mode is with-exercises
-      if (viewMode === "with-exercises") {
-        items.push({ type: "exercises", content, index });
-      }
-    });
-    return items;
-  }, [videos, viewMode]);
+  const feedItems: FeedItem[] = useMemo(
+    () => videos.map((content, index) => ({ type: "video", content, index })),
+    [videos]
+  );
 
   const currentItem = feedItems[currentIndex];
   const currentVideoIndex = currentItem?.index ?? 0;
   const currentVideo = videos[currentVideoIndex] ?? null;
 
   useEffect(() => {
-    if (currentItem && currentItem.index !== activeVideoIndex) {
-      setActiveVideoIndex(currentItem.index);
-    }
-  }, [currentItem, activeVideoIndex, currentIndex]);
-
-  useEffect(() => {
-    if (!currentVideo) {
+    if (!currentVideo || !isAdmin) {
       setShowModeration(false);
     }
-  }, [currentVideo]);
-
-  useEffect(() => {
-    if (!isAdmin) {
-      setShowModeration(false);
-    }
-  }, [isAdmin]);
+  }, [currentVideo, isAdmin]);
 
   useEffect(() => {
     if (!focusVideoId) {
@@ -185,40 +173,8 @@ export const VideoFeed = ({
   }, [focusVideoId, feedItems, onClearFocus]);
 
   useEffect(() => {
-    if (previousViewModeRef.current === viewMode) {
-      return;
-    }
-
-    previousViewModeRef.current = viewMode;
-
-    const targetIndex = feedItems.findIndex(
-      (item) => item.type === "video" && item.index === activeVideoIndex
-    );
-
-    if (targetIndex >= 0 && targetIndex !== currentIndex) {
-      currentIndexRef.current = targetIndex;
-      setCurrentIndex(targetIndex);
-      requestAnimationFrame(() => {
-        flatListRef.current?.scrollToIndex({
-          index: targetIndex,
-          animated: false,
-        });
-      });
-    }
-  }, [viewMode, feedItems, activeVideoIndex, currentIndex]);
-
-  useEffect(() => {
     currentIndexRef.current = currentIndex;
   }, [currentIndex]);
-
-  useEffect(() => {
-    return () => {
-      if (blockMessageTimerRef.current) {
-        clearTimeout(blockMessageTimerRef.current);
-        blockMessageTimerRef.current = null;
-      }
-    };
-  }, []);
 
   // Filter exercises based on count setting
   const getFilteredExercises = useCallback(
@@ -234,66 +190,38 @@ export const VideoFeed = ({
 
   // Check if user can scroll down
   // Returns: { canScroll: boolean, reason: 'end' | 'exercises' | null }
-  const canScrollDown = useCallback((): { canScroll: boolean; reason: 'end' | 'exercises' | null } => {
-    // Can't scroll past the end
-    if (currentIndex >= feedItems.length - 1) {
-      return { canScroll: false, reason: 'end' };
-    }
-
-    const currentFeedItem = feedItems[currentIndex];
-
-    // Safety check: if current item doesn't exist, don't allow scroll
-    if (!currentFeedItem) {
-      return { canScroll: false, reason: 'end' };
-    }
-
-    // If in without-exercises mode, ALL items are videos, so always allow scroll
-    if (viewMode === "without-exercises") {
-      return { canScroll: true, reason: null };
-    }
-
-    // In with-exercises mode:
-    // If on video page, always allow scroll to exercises
-    if (currentFeedItem.type === "video") {
-      return { canScroll: true, reason: null };
-    }
-
-    // If on exercises page, check if completed
-    if (currentFeedItem.type === "exercises") {
-      const hasSubmission =
-        lastSubmission &&
-        lastSubmission.contentId === currentFeedItem.content.id &&
-        submitStatus === "succeeded";
-      const isInCompleted = completedVideoIds.has(currentFeedItem.content.id);
-      const canScroll = isInCompleted || Boolean(hasSubmission);
-      return { canScroll, reason: canScroll ? null : 'exercises' };
-    }
-
-    // Default: allow scroll
-    return { canScroll: true, reason: null };
-  }, [
-    currentIndex,
-    feedItems,
-    completedVideoIds,
-    lastSubmission,
-    submitStatus,
-    viewMode,
-  ]);
-
-  const showScrollBlockedMessage = useCallback(() => {
-    setShowBlockMessage(true);
-    if (blockMessageTimerRef.current) {
-      clearTimeout(blockMessageTimerRef.current);
-    }
-    blockMessageTimerRef.current = setTimeout(() => {
-      setShowBlockMessage(false);
-      blockMessageTimerRef.current = null;
-    }, 2000);
-  }, []);
-
   const handleDismissRelaxationBanner = useCallback(() => {
     dispatch(clearFilterRelaxationMessage());
   }, [dispatch]);
+
+  const handleDifficultyChange = useCallback(
+    (value: DifficultyLevel) => {
+      dispatch(setDifficultyLevel(value));
+      dispatch(fetchVideoFeedWithRelaxation({ attemptNumber: 0 }));
+    },
+    [dispatch]
+  );
+
+  const handleSpeechSpeedChange = useCallback(
+    (value: SpeechSpeed) => {
+      dispatch(setSpeechSpeed(value));
+      dispatch(fetchVideoFeedWithRelaxation({ attemptNumber: 0 }));
+    },
+    [dispatch]
+  );
+
+  const handleToggleAdultContent = useCallback(() => {
+    dispatch(setShowAdultContent(!showAdultContent));
+    dispatch(fetchVideoFeedWithRelaxation({ attemptNumber: 0 }));
+  }, [dispatch, showAdultContent]);
+
+  const handleToggleEnglishSubtitles = useCallback(() => {
+    dispatch(setShowEnglishSubtitles(!showEnglishSubtitles));
+  }, [dispatch, showEnglishSubtitles]);
+
+  const handleToggleRussianSubtitles = useCallback(() => {
+    dispatch(setShowRussianSubtitles(!showRussianSubtitles));
+  }, [dispatch, showRussianSubtitles]);
 
   const handleScroll = useCallback(
     (event: NativeSyntheticEvent<NativeScrollEvent>) => {
@@ -303,31 +231,12 @@ export const VideoFeed = ({
   );
 
   const handleScrollBeginDrag = useCallback(() => {
-    if (blockMessageTimerRef.current) {
-      clearTimeout(blockMessageTimerRef.current);
-      blockMessageTimerRef.current = null;
-    }
-
-    // Start prefetching next video when user begins scrolling
-    const currentIdx = currentIndexRef.current;
-    const currentFeedItem = feedItems[currentIdx];
-
-    if (currentFeedItem) {
-      // Find the next video item (skip exercise rows)
-      let nextVideoIdx = -1;
-      for (let i = currentIdx + 1; i < feedItems.length; i += 1) {
-        if (feedItems[i].type === "video") {
-          nextVideoIdx = i;
-          break;
-        }
-      }
-
-      if (nextVideoIdx !== -1) {
-        const nextVideoItem = feedItems[nextVideoIdx];
-        if (prefetchVideoIndex !== nextVideoItem.index) {
-          prefetchCancelledRef.current = false;
-          setPrefetchVideoIndex(nextVideoItem.index);
-        }
+    const nextVideoIdx = currentIndexRef.current + 1;
+    if (nextVideoIdx < feedItems.length) {
+      const nextVideoItem = feedItems[nextVideoIdx];
+      if (prefetchVideoIndex !== nextVideoItem.index) {
+        prefetchCancelledRef.current = false;
+        setPrefetchVideoIndex(nextVideoItem.index);
       }
     }
   }, [feedItems, prefetchVideoIndex]);
@@ -336,7 +245,7 @@ export const VideoFeed = ({
     (
       offsetY: number,
       currentIndexValue: number,
-      options?: { velocityY?: number; showBlockMessage?: boolean }
+      options?: { velocityY?: number }
     ) => {
       const progress = SCREEN_HEIGHT === 0 ? 0 : offsetY / SCREEN_HEIGHT;
       const delta = progress - currentIndexValue;
@@ -357,17 +266,6 @@ export const VideoFeed = ({
         return currentIndexValue;
       }
 
-      if (direction > 0) {
-        const scrollCheck = canScrollDown();
-        if (!scrollCheck.canScroll) {
-          // Only show blocked message if it's due to exercises, not end of feed
-          if (scrollCheck.reason === 'exercises' && (options?.showBlockMessage ?? true)) {
-            showScrollBlockedMessage();
-          }
-          return currentIndexValue;
-        }
-      }
-
       let nextIndex = currentIndexValue + direction;
       if (nextIndex < 0 || nextIndex >= feedItems.length) {
         nextIndex = Math.max(
@@ -378,7 +276,7 @@ export const VideoFeed = ({
 
       return nextIndex;
     },
-    [SCREEN_HEIGHT, canScrollDown, feedItems.length, showScrollBlockedMessage]
+    [SCREEN_HEIGHT, feedItems.length]
   );
 
   const handleScrollEndDrag = useCallback(
@@ -420,7 +318,6 @@ export const VideoFeed = ({
       const previousIndex = currentIndexRef.current;
       const targetIndex = computeTargetIndex(offsetY, previousIndex, {
         velocityY,
-        showBlockMessage: false,
       });
 
       if (targetIndex !== previousIndex) {
@@ -444,12 +341,10 @@ export const VideoFeed = ({
   );
 
   const handleSubmit = useCallback(
-    (answers: SubmitAnswerPayload[]) => {
-      if (currentItem) {
-        onSubmitExercises(currentItem.content.id, answers);
-      }
+    (contentId: string, answers: SubmitAnswerPayload[]) => {
+      onSubmitExercises(contentId, answers);
     },
-    [currentItem, onSubmitExercises]
+    [onSubmitExercises]
   );
 
   useEffect(() => {
@@ -461,7 +356,7 @@ export const VideoFeed = ({
     }
   }, [videos.length]);
 
-  useEffect(() => {
+  const handleEndReached = useCallback(() => {
     if (
       isLoadingMore ||
       videos.length === 0 ||
@@ -470,74 +365,15 @@ export const VideoFeed = ({
       return;
     }
 
-    // Start loading more videos when we're 3 videos away from the end
-    // This gives time for videos to buffer while user watches current video
-    // Also try to load more even if hasMoreFeed is false (filter relaxation)
-    if (currentVideoIndex >= Math.max(0, videos.length - 3)) {
-      loadMoreRequestedRef.current = true;
-      dispatch(loadMoreVideoFeed({ attemptNumber: 0 }));
-    }
-  }, [
-    dispatch,
-    isLoadingMore,
-    videos.length,
-    currentVideoIndex,
-  ]);
-
-  // Auto-scroll to next video after completion
-  useEffect(() => {
-    if (
-      lastSubmission &&
-      submitStatus === "succeeded" &&
-      currentItem?.type === "exercises"
-    ) {
-      if (lastSubmission.contentId === currentItem.content.id) {
-        const timer = setTimeout(() => {
-          if (currentIndex + 1 < feedItems.length) {
-            flatListRef.current?.scrollToIndex({
-              index: currentIndex + 1,
-              animated: true,
-            });
-          }
-        }, 2000);
-        return () => clearTimeout(timer);
-      }
-    }
-    return undefined;
-  }, [
-    lastSubmission,
-    submitStatus,
-    currentItem,
-    currentIndex,
-    feedItems.length,
-  ]);
+    loadMoreRequestedRef.current = true;
+    dispatch(loadMoreVideoFeed({ attemptNumber: 0 }));
+  }, [dispatch, isLoadingMore, videos.length]);
 
   const renderItem: ListRenderItem<FeedItem> = useCallback(
     ({ item, index }) => {
       const isActive = index === currentIndex;
       const isCompleted = completedVideoIds.has(item.content.id);
-      // Preload current video + next 2 videos for smoother scrolling
-      // Use video index, not feed item index, to handle exercises correctly
-      if (item.type === "video") {
-        // Check if this video should be prefetched
-        const shouldPrefetch = prefetchVideoIndex === item.index;
-
-        return (
-          <VideoFeedItem
-            content={item.content}
-            isActive={isActive}
-            isCompleted={isCompleted}
-            onToggleLike={onToggleLike}
-            isLikePending={Boolean(likesUpdating[item.content.id])}
-            isTabFocused={isTabFocused}
-            shouldPrefetch={shouldPrefetch}
-            prefetchCancelled={prefetchCancelledRef.current}
-            onOpenModeration={isActive ? () => setShowModeration(true) : undefined}
-          />
-        );
-      }
-
-      // Exercises - filter based on settings
+      const shouldPrefetch = prefetchVideoIndex === item.index;
       const filteredExercises = getFilteredExercises(item.content);
       const exerciseSubmission =
         lastSubmission && lastSubmission.contentId === item.content.id
@@ -545,26 +381,46 @@ export const VideoFeed = ({
           : undefined;
 
       return (
-        <ExerciseOverlay
+        <VideoFeedItem
+          content={item.content}
+          analysis={item.content.analysis}
+          isActive={isActive}
+          isCompleted={isCompleted}
+          onToggleLike={onToggleLike}
+          isLikePending={Boolean(likesUpdating[item.content.id])}
+          isTabFocused={isTabFocused}
+          shouldPrefetch={shouldPrefetch}
+          prefetchCancelled={prefetchCancelledRef.current}
+          onOpenModeration={isActive ? () => setShowModeration(true) : undefined}
+          onOpenSettings={handleOpenSettings}
           exercises={filteredExercises}
-          onSubmit={handleSubmit}
+          onSubmitExercises={(answers) => handleSubmit(item.content.id, answers)}
           submitStatus={submitStatus}
-          lastSubmission={exerciseSubmission}
+          onDrawerStateChange={isActive ? setIsAnyDrawerOpen : undefined}
+          exerciseSubmission={
+            exerciseSubmission
+              ? {
+                  completed: exerciseSubmission.completed,
+                  correct: exerciseSubmission.correct,
+                  total: exerciseSubmission.total,
+                }
+              : undefined
+          }
         />
       );
     },
     [
       currentIndex,
-      // currentVideoIndex removed - not used in renderItem
       completedVideoIds,
-      handleSubmit,
-      submitStatus,
-      lastSubmission,
       getFilteredExercises,
+      handleOpenSettings,
+      handleSubmit,
+      isTabFocused,
+      lastSubmission,
       likesUpdating,
       onToggleLike,
-      isTabFocused,
       prefetchVideoIndex,
+      submitStatus,
     ]
   );
 
@@ -609,72 +465,67 @@ export const VideoFeed = ({
   }, [hasMoreFeed, isLoadingMore, totalFeedCount, videos.length]);
 
   return (
-    <View style={styles.container}>
-      <FlatList
-        ref={flatListRef}
-        data={feedItems}
-        renderItem={renderItem}
-        keyExtractor={keyExtractor}
-        pagingEnabled
-        showsVerticalScrollIndicator={false}
-        snapToInterval={SCREEN_HEIGHT}
-        snapToAlignment="start"
-        decelerationRate="fast"
-        onScroll={handleScroll}
-        onScrollBeginDrag={handleScrollBeginDrag}
-        onScrollEndDrag={handleScrollEndDrag}
-        onMomentumScrollEnd={handleMomentumScrollEnd}
-        scrollEventThrottle={16}
-        getItemLayout={getItemLayout}
-        removeClippedSubviews={true}
-        maxToRenderPerBatch={1}
-        windowSize={2}  // CRITICAL: Reduced from 3 to 2 - only render current + next video to save bandwidth
-        initialNumToRender={1}
-        updateCellsBatchingPeriod={50}
-        extraData={prefetchVideoIndex}
-        ListFooterComponent={footerComponent}
+    <>
+      <View style={styles.container}>
+        <Animated.FlatList
+          ref={flatListRef}
+          data={feedItems}
+          renderItem={renderItem}
+          keyExtractor={keyExtractor}
+          pagingEnabled
+          scrollEnabled={!isAnyDrawerOpen}
+          showsVerticalScrollIndicator={false}
+          snapToInterval={SCREEN_HEIGHT}
+          snapToAlignment="start"
+          decelerationRate={0.98}
+          onScroll={handleScroll}
+          onScrollBeginDrag={handleScrollBeginDrag}
+          onScrollEndDrag={handleScrollEndDrag}
+          onMomentumScrollEnd={handleMomentumScrollEnd}
+          onEndReached={handleEndReached}
+          onEndReachedThreshold={3 / Math.max(1, videos.length)}
+          scrollEventThrottle={16}
+          getItemLayout={getItemLayout}
+          removeClippedSubviews={true}
+          maxToRenderPerBatch={1}
+          windowSize={2}
+          initialNumToRender={1}
+          updateCellsBatchingPeriod={50}
+          extraData={prefetchVideoIndex}
+          ListFooterComponent={footerComponent}
+        />
+
+        {isAdmin && (
+          <VideoModerationModal
+            visible={showModeration}
+            onClose={() => setShowModeration(false)}
+            video={currentVideo}
+          />
+        )}
+
+        {filterRelaxationMessage && (
+          <FilterRelaxationBanner
+            message={filterRelaxationMessage}
+            onDismiss={handleDismissRelaxationBanner}
+          />
+        )}
+      </View>
+
+      <VideoSettingsSheet
+        visible={settingsVisible}
+        onClose={handleCloseSettings}
+        difficultyLevel={difficultyLevel}
+        speechSpeed={speechSpeedSetting}
+        showEnglishSubtitles={showEnglishSubtitles}
+        showRussianSubtitles={showRussianSubtitles}
+        showAdultContent={showAdultContent}
+        onSelectDifficulty={handleDifficultyChange}
+        onSelectSpeechSpeed={handleSpeechSpeedChange}
+        onToggleEnglish={handleToggleEnglishSubtitles}
+        onToggleRussian={handleToggleRussianSubtitles}
+        onToggleAdult={handleToggleAdultContent}
       />
-
-      {/* Block message overlay */}
-      <Modal visible={showBlockMessage} transparent animationType="fade">
-        <View style={styles.blockOverlay}>
-          <View
-            style={[
-              styles.blockMessage,
-              { backgroundColor: theme.colors.surface },
-            ]}
-          >
-            <Ionicons
-              name="lock-closed"
-              size={32}
-              color={theme.colors.danger ?? "#EF4444"}
-            />
-            <Typography variant="subtitle" style={styles.blockTitle}>
-              Сначала пройдите упражнения
-            </Typography>
-            <Typography variant="body" style={styles.blockText}>
-              Ответьте на все вопросы, чтобы перейти к следующему видео
-            </Typography>
-          </View>
-        </View>
-      </Modal>
-
-      {isAdmin && (
-        <VideoModerationModal
-          visible={showModeration}
-          onClose={() => setShowModeration(false)}
-          video={currentVideo}
-        />
-      )}
-
-      {/* Filter relaxation banner */}
-      {filterRelaxationMessage && (
-        <FilterRelaxationBanner
-          message={filterRelaxationMessage}
-          onDismiss={handleDismissRelaxationBanner}
-        />
-      )}
-    </View>
+    </>
   );
 };
 
@@ -702,29 +553,6 @@ const styles = StyleSheet.create({
     color: "#FFFFFF",
     fontSize: 12,
     marginLeft: 8,
-  },
-  blockOverlay: {
-    flex: 1,
-    backgroundColor: "rgba(0,0,0,0.7)",
-    alignItems: "center",
-    justifyContent: "center",
-    paddingHorizontal: 40,
-  },
-  blockMessage: {
-    padding: 24,
-    borderRadius: 20,
-    alignItems: "center",
-    gap: 12,
-    maxWidth: 320,
-  },
-  blockTitle: {
-    fontSize: 20,
-    fontWeight: "700",
-    textAlign: "center",
-  },
-  blockText: {
-    textAlign: "center",
-    opacity: 0.7,
   },
   footerLoader: {
     paddingVertical: 24,

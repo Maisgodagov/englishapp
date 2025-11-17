@@ -106,4 +106,17 @@ export const videoModerationApi = {
       headers: adminHeaders(userId, role),
     });
   },
+  getAuthors(userId: string, role: UserRole) {
+    return apiFetch<{ username: string }[]>('video-learning/authors', {
+      method: 'GET',
+      headers: adminHeaders(userId, role),
+    });
+  },
+  updateAuthor(contentId: string, author: string, userId: string, role: UserRole) {
+    return apiFetch<VideoContent>(`video-learning/${contentId}/moderation/author`, {
+      method: 'PATCH',
+      body: { author },
+      headers: adminHeaders(userId, role),
+    });
+  },
 };

@@ -212,6 +212,10 @@ export const VideoModerationModal = ({ visible, onClose, video }: VideoModeratio
   const [isModerated, setIsModerated] = useState(false);
   const [pendingKey, setPendingKey] = useState<string | null>(null);
   const [lastSavedKey, setLastSavedKey] = useState<string | null>(null);
+  const [author, setAuthor] = useState<string>('');
+  const [authorSuggestions, setAuthorSuggestions] = useState<string[]>([]);
+  const [showAuthorSuggestions, setShowAuthorSuggestions] = useState(false);
+  const [allAuthors, setAllAuthors] = useState<string[]>([]);
 
   const screenHeight = useMemo(
     () => getContentHeight(insets.top, insets.bottom),
@@ -233,6 +237,7 @@ export const VideoModerationModal = ({ visible, onClose, video }: VideoModeratio
       setExercises(source.exercises?.map(normalizeExercise) ?? []);
       setIsAdultContent(Boolean(source.isAdultContent));
       setIsModerated(Boolean(source.isModerated));
+      setAuthor(source.author ?? '');
     },
     [],
   );
@@ -242,6 +247,19 @@ export const VideoModerationModal = ({ visible, onClose, video }: VideoModeratio
       syncFromVideo(video);
     }
   }, [syncFromVideo, video, visible]);
+
+  useEffect(() => {
+    const loadAuthors = async () => {
+      if (!visible || !profile?.id || !isAdmin) return;
+      try {
+        const authors = await videoModerationApi.getAuthors(profile.id, profile.role);
+        setAllAuthors(authors.map(a => a.username));
+      } catch (error) {
+        console.error('Failed to load authors:', error);
+      }
+    };
+    loadAuthors();
+  }, [visible, profile?.id, profile?.role, isAdmin]);
 
   const ensureAdmin = useCallback(() => {
     if (!profile?.id || profile.role !== UserRole.Admin) {
@@ -311,6 +329,53 @@ const saveTopics = useCallback(() => {
     videoModerationApi.updateTopics(contentId, sanitized, userId, role),
   );
 }, [contentId, runWithLoader, topics]);
+
+const validateAuthor = (value: string): { valid: boolean; error?: string } => {
+  if (!value.trim()) {
+    return { valid: true }; // Empty is allowed
+  }
+  if (!value.startsWith('@')) {
+    return { valid: false, error: 'Имя автора должно начинаться с @' };
+  }
+  // Check only English letters, numbers, underscore
+  const authorHandle = value.slice(1); // Remove @
+  if (!/^[a-zA-Z0-9_]+$/.test(authorHandle)) {
+    return { valid: false, error: 'Используйте только английские буквы, цифры и подчёркивание' };
+  }
+  return { valid: true };
+};
+
+const handleAuthorChange = useCallback((value: string) => {
+  setAuthor(value);
+
+  if (value.length === 0) {
+    setShowAuthorSuggestions(false);
+    setAuthorSuggestions([]);
+    return;
+  }
+
+  // Filter suggestions
+  const filtered = allAuthors.filter(a =>
+    a.toLowerCase().includes(value.toLowerCase())
+  );
+  setAuthorSuggestions(filtered);
+  setShowAuthorSuggestions(filtered.length > 0);
+}, [allAuthors]);
+
+const saveAuthor = useCallback(() => {
+  if (!contentId) return;
+
+  const validation = validateAuthor(author);
+  if (!validation.valid) {
+    Alert.alert('Ошибка валидации', validation.error);
+    return;
+  }
+
+  runWithLoader('author', ({ userId, role }) =>
+    videoModerationApi.updateAuthor(contentId, author.trim(), userId, role),
+  );
+  setShowAuthorSuggestions(false);
+}, [author, contentId, runWithLoader]);
 
   const transformCaptions = useCallback(() => {
     const english: TranscriptChunk[] = [];
@@ -698,6 +763,72 @@ const saveTopics = useCallback(() => {
               {renderCompactSelector('Скорость речи', SPEED_OPTIONS, speechSpeed, (next) => setSpeechSpeed(next as SpeechSpeed), 'speech', saveSpeech)}
               {renderCompactSelector('Грамматическая сложность', GRAMMAR_OPTIONS, grammarComplexity, (next) => setGrammarComplexity(next as GrammarComplexity), 'grammar', saveGrammar)}
               {renderCompactSelector('Сложность словаря', VOCAB_OPTIONS, vocabComplexity, (next) => setVocabComplexity(next as VocabularyComplexity), 'vocab', saveVocabulary)}
+
+              {/* Author */}
+              <View style={styles.compactSection}>
+                <Typography variant="subtitle" weight="semibold" style={styles.sectionTitle}>
+                  Автор видео
+                </Typography>
+                <View style={{ position: 'relative' }}>
+                  <TextInput
+                    style={[
+                      styles.authorInput,
+                      {
+                        backgroundColor: theme.colors.surface,
+                        borderColor: theme.colors.border,
+                        color: theme.colors.text,
+                      }
+                    ]}
+                    value={author}
+                    onChangeText={handleAuthorChange}
+                    placeholder="@username"
+                    placeholderTextColor={theme.colors.textSecondary}
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                  />
+                  {showAuthorSuggestions && authorSuggestions.length > 0 && (
+                    <View
+                      style={[
+                        styles.suggestionsList,
+                        {
+                          backgroundColor: theme.colors.surface,
+                          borderColor: theme.colors.border,
+                        }
+                      ]}
+                    >
+                      {authorSuggestions.map((suggestion) => (
+                        <TouchableOpacity
+                          key={suggestion}
+                          style={[
+                            styles.suggestionItem,
+                            { borderBottomColor: theme.colors.border }
+                          ]}
+                          onPress={() => {
+                            setAuthor(suggestion);
+                            setShowAuthorSuggestions(false);
+                          }}
+                          activeOpacity={0.7}
+                        >
+                          <Typography variant="body" style={{ color: theme.colors.text }}>
+                            {suggestion}
+                          </Typography>
+                        </TouchableOpacity>
+                      ))}
+                    </View>
+                  )}
+                </View>
+                <ActionButton
+                  label="Сохранить автора"
+                  variant="primary"
+                  loading={pendingKey === 'author'}
+                  onPress={saveAuthor}
+                />
+                {lastSavedKey === 'author' && (
+                  <Typography variant="caption" style={styles.successLabel}>
+                    Сохранено
+                  </Typography>
+                )}
+              </View>
 
               {/* Topics */}
               <View style={styles.compactSection}>
@@ -1659,6 +1790,34 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
     borderRadius: 12,
     marginTop: 16,
+  },
+  authorInput: {
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    fontSize: 16,
+    marginBottom: 12,
+  },
+  suggestionsList: {
+    position: 'absolute',
+    top: 50,
+    left: 0,
+    right: 0,
+    borderWidth: 1,
+    borderRadius: 10,
+    maxHeight: 200,
+    zIndex: 1000,
+    elevation: 5,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 3.84,
+  },
+  suggestionItem: {
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
   },
 });
 

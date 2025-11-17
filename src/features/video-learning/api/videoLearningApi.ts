@@ -60,6 +60,7 @@ export interface VideoFeedItem {
   createdAt: string;
   isAdultContent?: boolean;
   isModerated?: boolean;
+  author?: string | null;
 }
 
 export interface VideoFeedResponse {
@@ -84,6 +85,7 @@ export interface VideoContent {
   updatedAt: string;
   isAdultContent?: boolean;
   isModerated?: boolean;
+  author?: string | null;
 }
 
 export interface PhraseSnippet {
