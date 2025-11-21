@@ -2,7 +2,7 @@ import { useMemo, useRef } from "react";
 import { View, StyleSheet, ScrollView, TouchableOpacity } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useTheme } from "styled-components/native";
-import Ionicons from "@expo/vector-icons/Ionicons";
+import { Trophy, Flame } from "lucide-react-native";
 
 import { useAppSelector } from "@core/store/hooks";
 import { Typography } from "@shared/ui";
@@ -29,7 +29,7 @@ export default function HomeScreen() {
       <View style={styles.header}>
         {profile && (
           <View style={styles.statItem}>
-            <Ionicons name="trophy-outline" size={22} color="#F59E0B" />
+            <Trophy size={22} color="#F59E0B" />
             <Typography variant="body" style={styles.statValue}>
               {profile.xpPoints}
             </Typography>
@@ -42,7 +42,7 @@ export default function HomeScreen() {
 
         {profile && (
           <View style={styles.statItem}>
-            <Ionicons name="flame-outline" size={22} color="#EF4444" />
+            <Flame size={22} color="#EF4444" />
             <Typography variant="body" style={styles.statValue}>
               {profile.streakDays}
             </Typography>
@@ -59,7 +59,7 @@ export default function HomeScreen() {
           <TouchableOpacity
             ref={buttonRef}
             onPress={testWordLookup}
-            style={{ padding: 20, backgroundColor: "#1E88E5", borderRadius: 8 }}
+            style={{ padding: 20, backgroundColor: theme.colors.primary, borderRadius: 8 }}
           >
             <Typography variant="body" style={{ color: "#FFF" }}>
               Тест поповера (нажми)
@@ -111,7 +111,7 @@ const getStyles = (theme: any) =>
   StyleSheet.create({
     container: {
       flex: 1,
-      backgroundColor: theme.colors.backgroundAlt,
+      backgroundColor: theme.colors.background,
     },
     header: {
       flexDirection: "row",

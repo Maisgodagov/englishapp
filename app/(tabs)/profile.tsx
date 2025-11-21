@@ -9,7 +9,7 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import Swipeable from "react-native-gesture-handler/Swipeable";
-import Ionicons from "@expo/vector-icons/Ionicons";
+import { Settings, Trophy, Flame, CheckCircle, Trash2, Volume2, PauseCircle } from "lucide-react-native";
 import { Audio } from "expo-audio";
 import { useTheme } from "styled-components/native";
 
@@ -135,7 +135,7 @@ export default function ProfileScreen() {
           onPress={() => handleRemoveWord(wordId)}
           style={styles.deleteButton}
         >
-          <Ionicons name="trash-outline" size={24} color="#FFFFFF" />
+          <Trash2 size={24} color="#FFFFFF" />
         </TouchableOpacity>
       </Animated.View>
     );
@@ -155,11 +155,7 @@ export default function ProfileScreen() {
             onPress={handleOpenSettings}
             style={styles.settingsButton}
           >
-            <Ionicons
-              name="settings-outline"
-              size={24}
-              color={theme.colors.text}
-            />
+            <Settings size={24} color={theme.colors.text} />
           </TouchableOpacity>
         </View>
 
@@ -184,13 +180,13 @@ export default function ProfileScreen() {
                 </View>
                 <View style={styles.statsRow}>
                   <View style={styles.statItem}>
-                    <Ionicons name="trophy-outline" size={24} color="#F59E0B" />
+                    <Trophy size={24} color="#F59E0B" />
                     <Typography variant="body" style={styles.statValue}>
                       {profile.xpPoints} XP
                     </Typography>
                   </View>
                   <View style={styles.statItem}>
-                    <Ionicons name="flame-outline" size={24} color="#EF4444" />
+                    <Flame size={24} color="#EF4444" />
                     <Typography variant="body" style={styles.statValue}>
                       {profile.streakDays}{" "}
                       {profile.streakDays === 1
@@ -201,11 +197,7 @@ export default function ProfileScreen() {
                     </Typography>
                   </View>
                   <View style={styles.statItem}>
-                    <Ionicons
-                      name="checkmark-circle-outline"
-                      size={24}
-                      color="#10B981"
-                    />
+                    <CheckCircle size={24} color="#10B981" />
                     <Typography variant="body" style={styles.statValue}>
                       {profile.completedLessons} уроков
                     </Typography>
@@ -295,15 +287,7 @@ export default function ProfileScreen() {
                                   }
                                   style={styles.audioButton}
                                 >
-                                  <Ionicons
-                                    name={
-                                      playingId === item.id
-                                        ? "pause-circle"
-                                        : "volume-medium"
-                                    }
-                                    size={26}
-                                    color="#3B82F6"
-                                  />
+                                  {playingId === item.id ? (<PauseCircle size={26} color="#3B82F6" />) : (<Volume2 size={26} color="#3B82F6" />)}
                                 </TouchableOpacity>
                               )}
                             </View>
@@ -326,7 +310,7 @@ const getStyles = (theme: any) =>
   StyleSheet.create({
     container: {
       flex: 1,
-      backgroundColor: theme.colors.backgroundAlt,
+      backgroundColor: theme.colors.background,
     },
     header: {
       flexDirection: "row",

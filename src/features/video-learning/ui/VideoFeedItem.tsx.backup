@@ -1,11 +1,10 @@
-﻿import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
   Animated,
   Platform,
   StyleSheet,
-  ScrollView,
   TouchableOpacity,
   TouchableWithoutFeedback,
   View,
@@ -25,15 +24,7 @@ import Video, {
   OnBandwidthUpdateData,
   VideoRef,
 } from "react-native-video";
-import {
-  Heart,
-  Play,
-  MoreVertical,
-  ShieldCheck,
-  Brain,
-  AlertCircle,
-  Pencil,
-} from "lucide-react-native";
+import { Heart, Play, MoreVertical, ShieldCheck, Puzzle, X, AlertCircle, Pencil } from "lucide-react-native";
 
 import { Typography } from "@shared/ui";
 import { useAppSelector } from "@core/store/hooks";
@@ -80,17 +71,30 @@ const formatTime = (seconds: number): string => {
 };
 
 // форматируем уровень CEFR
-const formatCEFRLevel = (level: string): string => level;
+const formatCEFRLevel = (level: string): string => {
+  switch (level) {
+    case "A1":
+      return `Легкий уровень - ${level}`;
+    case "A2":
+    case "B1":
+      return `Средний уровень - ${level}`;
+    case "B2":
+    case "C1":
+      return `Высокий уровень - ${level}`;
+    default:
+      return level;
+  }
+};
 
 // форматируем скорость речи
 const formatSpeechSpeed = (speed: string): string => {
   switch (speed) {
     case "slow":
-      return "медленная речь";
+      return "Медленная речь";
     case "normal":
-      return "обычная скорость речи";
+      return "Обычная скорость речи";
     case "fast":
-      return "быстрая речь";
+      return "Быстрая речь";
     default:
       return speed;
   }
@@ -720,16 +724,16 @@ const VideoFeedItemComponent = ({
             <TouchableOpacity
               onPress={onOpenModeration}
               activeOpacity={0.7}
-            style={[
-              styles.moderationButton,
-              {
-                backgroundColor: content.isModerated
-                  ? "rgba(76, 175, 80, 0.9)"
-                  : "rgba(239, 68, 68, 0.9)",
-              },
-            ]}
-          >
-              <ShieldCheck size={24} color="#FFFFFF" />
+              style={[
+                styles.moderationButton,
+                {
+                  backgroundColor: content.isModerated
+                    ? "rgba(76, 175, 80, 0.9)"
+                    : "rgba(239, 68, 68, 0.9)",
+                },
+              ]}
+            >
+              <Ionicons name="shield-checkmark" size={24} color="#FFFFFF" />
             </TouchableOpacity>
           )}
         </View>
@@ -743,10 +747,10 @@ const VideoFeedItemComponent = ({
             activeOpacity={0.7}
             style={styles.likeButton}
           >
-            <Heart
+            <Ionicons
+              name={displayIsLiked ? "heart" : "heart-outline"}
               size={44}
               color={displayIsLiked ? "#E11D48" : "#FFFFFF"}
-              fill={displayIsLiked ? "#E11D48" : "none"}
             />
           </TouchableOpacity>
           <Typography
@@ -765,7 +769,11 @@ const VideoFeedItemComponent = ({
             activeOpacity={0.85}
             style={styles.exerciseButton}
           >
-            <Brain size={42} color="#FFFFFF" />
+            <Ionicons
+              name="extension-puzzle-outline"
+              size={42}
+              color="#FFFFFF"
+            />
           </TouchableOpacity>
         </View>
       )}
@@ -773,35 +781,31 @@ const VideoFeedItemComponent = ({
       {/* Header with tags and settings button */}
       {isActive && analysis && !isExerciseDrawerOpen && (
         <View style={[styles.headerContainer, { paddingTop: insets.top + 12 }]}>
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            style={styles.tagsScroll}
-            contentContainerStyle={styles.tagsContainer}
-          >
-            {[
-              formatCEFRLevel(analysis.cefrLevel).toUpperCase(),
-              formatSpeechSpeed(analysis.speechSpeed).toLowerCase(),
-              ...(content.author ? [content.author.toLowerCase()] : []),
-              ...(content.isAdultContent ? ["18+"] : []),
-            ].map((label, index) => (
-              <View key={`${label}-${index}`} style={styles.tag}>
-                <Typography
-                  variant="caption"
-                  style={styles.tagText}
-                  enableWordLookup={false}
-                >
-                  {label}
+          <View>
+            <View style={styles.tagsContainer}>
+              <View style={styles.tag}>
+                <Typography variant="caption" style={styles.tagText}>
+                  {formatCEFRLevel(analysis.cefrLevel)}
                 </Typography>
               </View>
-            ))}
-          </ScrollView>
+              <View style={styles.tag}>
+                <Typography variant="caption" style={styles.tagText}>
+                  {formatSpeechSpeed(analysis.speechSpeed)}
+                </Typography>
+              </View>
+            </View>
+            {content.author && (
+              <Typography variant="caption" style={styles.headerAuthor}>
+                {content.author}
+              </Typography>
+            )}
+          </View>
           <TouchableOpacity
             onPress={onOpenSettings}
             activeOpacity={0.7}
             style={styles.headerSettingsButton}
           >
-            <MoreVertical size={24} color="#FFFFFF" />
+            <Ionicons name="options-outline" size={24} color="#FFFFFF" />
           </TouchableOpacity>
         </View>
       )}
@@ -896,9 +900,13 @@ const VideoFeedItemComponent = ({
                       alignItems: "center",
                       padding: 20,
                     },
-              ]}
-            >
-                  <AlertCircle size={64} color="#FF6B6B" />
+                  ]}
+                >
+                  <Ionicons
+                    name="alert-circle-outline"
+                    size={64}
+                    color="#FF6B6B"
+                  />
                   <Typography
                     variant="subtitle"
                     style={{
@@ -962,7 +970,7 @@ const VideoFeedItemComponent = ({
           },
         ]}
       >
-        <Heart size={96} color="#E11D48" fill="#E11D48" />
+        <Ionicons name="heart" size={96} color="#E11D48" />
       </Animated.View>
 
       <View
@@ -975,27 +983,29 @@ const VideoFeedItemComponent = ({
         {((showEnglishSubtitles && activeTranscript) ||
           (showRussianSubtitles && activeTranslation)) && (
           <View style={styles.subtitleContainer}>
-            {isAdmin && showEnglishSubtitles && activeTranscript && (
-              <TouchableOpacity
-                style={styles.subtitleEditButton}
-                onPress={handleOpenSubtitleEditor}
-                disabled={isSavingSubtitle}
-                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-              >
-                <Pencil size={15} color="rgba(255,255,255,0.8)" />
-              </TouchableOpacity>
-            )}
             {showEnglishSubtitles && activeTranscript && (
-              <View style={styles.subtitleRow}>
-                <View style={styles.subtitleBox}>
-                  <Typography
-                    variant="body"
-                    style={styles.subtitleEn}
-                    enableWordLookup={true}
+              <View style={styles.subtitleBox}>
+                {isAdmin && (
+                  <TouchableOpacity
+                    style={styles.subtitleEditButton}
+                    onPress={handleOpenSubtitleEditor}
+                    disabled={isSavingSubtitle}
+                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                   >
-                    {activeTranscript.text}
-                  </Typography>
-                </View>
+                    <Ionicons
+                      name="pencil"
+                      size={15}
+                      color="rgba(255,255,255,0.8)"
+                    />
+                  </TouchableOpacity>
+                )}
+                <Typography
+                  variant="body"
+                  style={styles.subtitleEn}
+                  enableWordLookup={true}
+                >
+                  {activeTranscript.text}
+                </Typography>
               </View>
             )}
             {showRussianSubtitles && activeTranslation && (
@@ -1013,10 +1023,10 @@ const VideoFeedItemComponent = ({
         )}
       </View>
 
-      {!isPlaying && !isExerciseDrawerOpen && (
+      {!isPlaying && (
         <View style={styles.centerIcon} pointerEvents="none">
           <View style={styles.iconBackground}>
-            <Play size={56} color="#FFFFFF" />
+            <Ionicons name="play" size={56} color="#FFFFFF" />
           </View>
         </View>
       )}
@@ -1070,6 +1080,12 @@ const VideoFeedItemComponent = ({
             {...drawerPanResponder.panHandlers}
           >
             <View style={styles.exerciseDrawerHandle} />
+            <TouchableOpacity
+              onPress={closeExerciseDrawer}
+              style={styles.drawerCloseButton}
+            >
+              <Ionicons name="close" size={22} color="#FFFFFF" />
+            </TouchableOpacity>
             <ExerciseOverlay
               exercises={exercises}
               onSubmit={onSubmitExercises}
@@ -1111,30 +1127,32 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "space-between",
     paddingHorizontal: 16,
-    paddingRight: 0,
     paddingVertical: 12,
     zIndex: 200,
   },
-  tagsScroll: {
-    flex: 1,
-  },
   tagsContainer: {
     flexDirection: "row",
-    alignItems: "center",
     gap: 8,
-    paddingRight: 8,
   },
   tag: {
     backgroundColor: "rgba(0, 0, 0, 0.6)",
     paddingHorizontal: 12,
     paddingVertical: 6,
     borderRadius: 16,
-    borderWidth: 0,
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.2)",
   },
   tagText: {
     color: "#FFFFFF",
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: "600",
+    textTransform: "uppercase",
+  },
+  headerAuthor: {
+    color: "#FFFFFF",
+    fontSize: 12,
+    fontWeight: "600",
+    marginTop: 6,
   },
   headerSettingsButton: {
     width: 40,
@@ -1155,7 +1173,7 @@ const styles = StyleSheet.create({
     position: "absolute",
     right: 8,
     top: "50%",
-    transform: [{ translateY: 0 }],
+    transform: [{ translateY: 40 }],
     alignItems: "center",
     zIndex: 100,
     gap: 12,
@@ -1329,16 +1347,9 @@ const styles = StyleSheet.create({
   },
   subtitleContainer: {
     gap: 12,
-    marginBottom: 10,
+    marginBottom: -40,
     zIndex: 5,
     position: "relative",
-  },
-  subtitleRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 8,
-    alignSelf: "center",
   },
   subtitleBox: {
     backgroundColor: "rgba(0, 0, 0, 0.90)",
@@ -1355,14 +1366,13 @@ const styles = StyleSheet.create({
   },
   subtitleEditButton: {
     position: "absolute",
-    top: -32,
-    left: 8,
+    top: 8,
+    left: 10,
     backgroundColor: "rgba(0, 0, 0, 0.4)",
     borderRadius: 12,
     padding: 6,
     borderWidth: 1,
     borderColor: "rgba(255,255,255,0.2)",
-    zIndex: 6,
   },
   subtitleBoxRu: {
     backgroundColor: "rgba(0, 0, 0, 0.85)",
@@ -1405,7 +1415,7 @@ const styles = StyleSheet.create({
   },
   progressBarContainer: {
     position: "absolute",
-    bottom: 24,
+    bottom: 12,
     left: 0,
     right: 0,
     height: 20,
@@ -1464,7 +1474,7 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     bottom: 0,
-    backgroundColor: "#F4F6FB",
+    backgroundColor: "#0A0D16",
     borderTopLeftRadius: 28,
     borderTopRightRadius: 28,
     paddingHorizontal: 0,
@@ -1477,7 +1487,7 @@ const styles = StyleSheet.create({
     width: 46,
     height: 5,
     borderRadius: 999,
-    backgroundColor: "rgba(0,0,0,0.18)",
+    backgroundColor: "rgba(255,255,255,0.3)",
     marginTop: 4,
     marginBottom: 8,
   },
@@ -1498,6 +1508,18 @@ const styles = StyleSheet.create({
     marginBottom: 6,
     paddingHorizontal: 16,
     fontSize: 13,
+  },
+  drawerCloseButton: {
+    position: "absolute",
+    top: 12,
+    right: 16,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(255,255,255,0.08)",
+    zIndex: 200,
   },
 });
 
@@ -1554,4 +1576,3 @@ export const VideoFeedItem = memo(
   areVideoFeedItemPropsEqual
 );
 VideoFeedItem.displayName = "VideoFeedItem";
-

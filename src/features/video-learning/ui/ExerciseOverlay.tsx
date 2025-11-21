@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState, useMemo } from "react";
 import { ScrollView, StyleSheet, TouchableOpacity, View } from "react-native";
 import { useTheme } from "styled-components/native";
-import { Ionicons } from "@expo/vector-icons";
+import { CheckCircle, XCircle, Trophy, BarChart3, ChevronDown } from "lucide-react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { Typography } from "@shared/ui";
@@ -53,7 +53,8 @@ export const ExerciseOverlay = ({
   const theme = useTheme() as any;
   const insets = useSafeAreaInsets();
   const timerRef = useRef<NodeJS.Timeout | null>(null);
-  const isDark = Boolean(theme?.dark);
+  const isDark =
+    theme?.dark ?? (theme?.colors?.background ?? "").toLowerCase?.() === "#0f172a";
   const primary = theme.colors.primary;
   const success = theme.colors.success ?? "#22C55E";
   const danger = theme.colors.danger ?? "#EF4444";
@@ -156,6 +157,7 @@ export const ExerciseOverlay = ({
     isDark
   );
   const textPrimary = theme.colors.text ?? "#FFFFFF";
+  const surface = theme.colors.surface ?? (isDark ? "#0A0D16" : "#FFFFFF");
 
   const [answers, setAnswers] = useState<Record<string, number>>({});
   const [currentExerciseIndex, setCurrentExerciseIndex] = useState(0);
@@ -241,7 +243,10 @@ export const ExerciseOverlay = ({
     <View
       style={[
         styles.container,
-        { backgroundColor: theme.colors.background, height: containerHeight },
+        {
+          backgroundColor: surface,
+          height: containerHeight,
+        },
       ]}
     >
       <ScrollView
@@ -303,7 +308,7 @@ export const ExerciseOverlay = ({
                 let indicatorBackground = optionBadgeBackground;
                 let indicatorBorder = optionBorder;
                 let indicatorColor = primary;
-                let icon: "checkmark-circle" | "close-circle" | null = null;
+                let icon: "check-circle" | "x-circle" | null = null;
                 let iconColor = primary;
 
                 if (isCorrectOption) {
@@ -312,7 +317,7 @@ export const ExerciseOverlay = ({
                   indicatorBackground = optionCorrectBackground;
                   indicatorBorder = success;
                   indicatorColor = success;
-                  icon = "checkmark-circle";
+                  icon = "check-circle";
                   iconColor = success;
                 } else if (isWrongSelection) {
                   borderColor = danger;
@@ -320,7 +325,7 @@ export const ExerciseOverlay = ({
                   indicatorBackground = optionDangerBackground;
                   indicatorBorder = danger;
                   indicatorColor = danger;
-                  icon = "close-circle";
+                  icon = "x-circle";
                   iconColor = danger;
                 } else if (isSelected) {
                   borderColor = primary;
@@ -374,12 +379,19 @@ export const ExerciseOverlay = ({
                       </Typography>
                     </View>
                     {icon && (
-                      <Ionicons
-                        name={icon}
-                        size={24}
-                        color={iconColor}
-                        style={styles.optionTrailingIcon}
-                      />
+                      icon === "check-circle" ? (
+                        <CheckCircle
+                          size={24}
+                          color={iconColor}
+                          style={styles.optionTrailingIcon}
+                        />
+                      ) : (
+                        <XCircle
+                          size={24}
+                          color={iconColor}
+                          style={styles.optionTrailingIcon}
+                        />
+                      )
                     )}
                   </TouchableOpacity>
                 );
@@ -400,15 +412,17 @@ export const ExerciseOverlay = ({
                   },
                 ]}
               >
-                <Ionicons
-                  name={
-                    feedback.type === "correct"
-                      ? "checkmark-circle"
-                      : "close-circle"
-                  }
-                  size={22}
-                  color={feedback.type === "correct" ? success : danger}
-                />
+                {feedback.type === "correct" ? (
+                  <CheckCircle
+                    size={22}
+                    color={success}
+                  />
+                ) : (
+                  <XCircle
+                    size={22}
+                    color={danger}
+                  />
+                )}
                 <Typography variant="body" style={styles.feedbackText}>
                   {feedback.type === "correct"
                     ? "Отлично! Правильный ответ!"
@@ -431,11 +445,17 @@ export const ExerciseOverlay = ({
                 },
               ]}
             >
-              <Ionicons
-                name={resultCompleted ? "trophy" : "analytics"}
-                size={48}
-                color={resultCompleted ? "#FFD700" : theme.colors.primary}
-              />
+              {resultCompleted ? (
+                <Trophy
+                  size={48}
+                  color="#FFD700"
+                />
+              ) : (
+                <BarChart3
+                  size={48}
+                  color={theme.colors.primary}
+                />
+              )}
               <Typography variant="title" style={styles.resultsTitle}>
                 {resultCompleted
                   ? "All exercises complete!"
@@ -482,8 +502,7 @@ export const ExerciseOverlay = ({
                 },
               ]}
             >
-              <Ionicons
-                name="chevron-down"
+              <ChevronDown
                 size={32}
                 color={theme.colors.primary}
               />
@@ -512,10 +531,10 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   scrollContent: {
-    paddingTop: 8,
-    paddingBottom: 12,
+    paddingTop: 6,
+    paddingBottom: 18,
     paddingHorizontal: 8,
-    gap: 12,
+    gap: 16,
   },
   header: {
     gap: 4,
@@ -545,7 +564,7 @@ const styles = StyleSheet.create({
     fontSize: 12,
   },
   content: {
-    gap: 12,
+    gap: 14,
   },
   progressRow: {
     flexDirection: "row",
@@ -573,19 +592,19 @@ const styles = StyleSheet.create({
     fontSize: 12,
   },
   questionCard: {
-    padding: 12,
-    borderRadius: 12,
-    gap: 8,
+    padding: 16,
+    borderRadius: 16,
+    gap: 10,
     borderWidth: 1,
   },
   questionNumber: {
     opacity: 0.6,
-    fontSize: 11,
+    fontSize: 12,
   },
   questionText: {
-    fontSize: 15,
+    fontSize: 16,
     fontWeight: "700",
-    lineHeight: 19,
+    lineHeight: 22,
   },
   wordBadge: {
     alignSelf: "flex-start",
@@ -601,15 +620,15 @@ const styles = StyleSheet.create({
     fontSize: 12,
   },
   optionsContainer: {
-    gap: 8,
+    gap: 10,
   },
   option: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 10,
-    paddingVertical: 10,
-    paddingHorizontal: 12,
-    borderRadius: 12,
+    gap: 12,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    borderRadius: 14,
     borderWidth: 1,
   },
   optionInner: {
@@ -627,11 +646,11 @@ const styles = StyleSheet.create({
   },
   optionBadgeText: {
     fontWeight: "700",
-    fontSize: 12,
+    fontSize: 13,
   },
   optionText: {
-    fontSize: 14,
-    lineHeight: 18,
+    fontSize: 15.5,
+    lineHeight: 21,
     flexShrink: 1,
   },
   optionTrailingIcon: {
@@ -641,17 +660,17 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: 10,
-    padding: 10,
-    borderRadius: 12,
+    padding: 12,
+    borderRadius: 14,
     borderWidth: 1,
   },
   feedbackText: {
     flex: 1,
-    fontSize: 13,
+    fontSize: 14,
     fontWeight: "600",
   },
   resultsContainer: {
-    gap: 20,
+    gap: 24,
   },
   resultsCard: {
     paddingVertical: 20,
@@ -667,7 +686,7 @@ const styles = StyleSheet.create({
     textAlign: "center",
   },
   resultsScore: {
-    fontSize: 14,
+    fontSize: 15,
     opacity: 0.75,
     textAlign: "center",
   },
@@ -697,5 +716,6 @@ const styles = StyleSheet.create({
     textAlign: "center",
     fontWeight: "600",
     opacity: 0.85,
+    fontSize: 14,
   },
 });

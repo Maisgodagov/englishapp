@@ -41,10 +41,10 @@ const ModerationFilterButtonComponent = () => {
 
   // Background color based on filter
   const buttonColor = moderationFilter === 'moderated'
-    ? 'rgba(76, 175, 80, 0.9)' // Green
+    ? 'rgba(76, 175, 80, 0.9)'
     : moderationFilter === 'unmoderated'
-    ? 'rgba(239, 68, 68, 0.9)' // Red
-    : 'rgba(255, 255, 255, 0.2)'; // Gray
+    ? 'rgba(239, 68, 68, 0.9)'
+    : 'rgba(255, 255, 255, 0.2)';
 
   return (
     <View style={styles.container}>

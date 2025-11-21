@@ -1,9 +1,11 @@
 import { Tabs } from "expo-router";
-import Ionicons from "@expo/vector-icons/Ionicons";
+import { Home, Book, Video, User } from "lucide-react-native";
 import { useTheme } from "styled-components/native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 export default function TabLayout() {
   const theme = useTheme() as any;
+  const insets = useSafeAreaInsets();
 
   return (
     <Tabs
@@ -11,9 +13,13 @@ export default function TabLayout() {
         tabBarActiveTintColor: theme.colors.primary,
         tabBarInactiveTintColor: theme.colors.textSecondary,
         headerShown: false,
+        tabBarShowLabel: false,
         tabBarStyle: {
-          backgroundColor: theme.colors.surface,
+          backgroundColor: "#FFFFFF",
           borderTopColor: theme.colors.border,
+          height: 60 + insets.bottom,
+          paddingTop: 8,
+          paddingBottom: insets.bottom,
         },
       }}
     >
@@ -21,8 +27,8 @@ export default function TabLayout() {
         name="home"
         options={{
           title: "Home",
-          tabBarIcon: ({ color }) => (
-            <Ionicons name="home" size={28} color={color} />
+          tabBarIcon: ({ color, focused }) => (
+            <Home size={28} color={color} fill={focused ? color : "none"} />
           ),
         }}
       />
@@ -30,8 +36,8 @@ export default function TabLayout() {
         name="video-dictionary"
         options={{
           title: "Видеословарь",
-          tabBarIcon: ({ color }) => (
-            <Ionicons name="book" size={28} color={color} />
+          tabBarIcon: ({ color, focused }) => (
+            <Book size={28} color={color} fill={focused ? color : "none"} />
           ),
         }}
       />
@@ -39,8 +45,8 @@ export default function TabLayout() {
         name="video-learning"
         options={{
           title: "Video",
-          tabBarIcon: ({ color }) => (
-            <Ionicons name="videocam" size={28} color={color} />
+          tabBarIcon: ({ color, focused }) => (
+            <Video size={28} color={color} fill={focused ? color : "none"} />
           ),
         }}
       />
@@ -48,8 +54,8 @@ export default function TabLayout() {
         name="profile"
         options={{
           title: "Profile",
-          tabBarIcon: ({ color }) => (
-            <Ionicons name="person-circle" size={28} color={color} />
+          tabBarIcon: ({ color, focused }) => (
+            <User size={28} color={color} fill={focused ? color : "none"} />
           ),
         }}
       />

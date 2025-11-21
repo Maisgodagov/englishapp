@@ -12,7 +12,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from 'styled-components/native';
-import { Ionicons } from '@expo/vector-icons';
+import { X, Check, Save, ChevronUp, ChevronDown, XCircle, Plus, Trash2, Edit3, PlusCircle, MinusCircle } from 'lucide-react-native';
 
 import { Typography } from '@shared/ui';
 import { useAppDispatch, useAppSelector } from '@core/store/hooks';
@@ -626,11 +626,11 @@ const saveAuthor = useCallback(() => {
             <Typography variant="body" style={{ color: theme.colors.text, flex: 1 }}>
               {selectedOption?.label}
             </Typography>
-            <Ionicons
-              name={isOpen ? "chevron-up" : "chevron-down"}
-              size={20}
-              color={theme.colors.textSecondary}
-            />
+            {isOpen ? (
+              <ChevronUp size={20} color={theme.colors.textSecondary} />
+            ) : (
+              <ChevronDown size={20} color={theme.colors.textSecondary} />
+            )}
           </TouchableOpacity>
           <TouchableOpacity
             style={[
@@ -646,9 +646,9 @@ const saveAuthor = useCallback(() => {
             {pendingKey === saveKey ? (
               <ActivityIndicator size="small" color="#FFFFFF" />
             ) : lastSavedKey === saveKey ? (
-              <Ionicons name="checkmark" size={20} color="#FFFFFF" />
+              <Check size={20} color="#FFFFFF" />
             ) : (
-              <Ionicons name="save" size={20} color="#FFFFFF" />
+              <Save size={20} color="#FFFFFF" />
             )}
           </TouchableOpacity>
         </View>
@@ -700,8 +700,7 @@ const saveAuthor = useCallback(() => {
                       {option.label}
                     </Typography>
                     {option.value === value && (
-                      <Ionicons
-                        name="checkmark"
+                      <Check
                         size={20}
                         color={theme.colors.primary}
                       />
@@ -743,7 +742,7 @@ const saveAuthor = useCallback(() => {
               </Typography>
             </View>
             <TouchableOpacity onPress={onClose} style={styles.closeButton} activeOpacity={0.7}>
-              <Ionicons name="close" size={22} color={theme.colors.text} />
+              <X size={22} color={theme.colors.text} />
             </TouchableOpacity>
           </View>
 
@@ -852,7 +851,7 @@ const saveAuthor = useCallback(() => {
                         {TOPIC_TRANSLATIONS[topic] || topic}
                       </Typography>
                       <TouchableOpacity onPress={() => removeTag(topic)} activeOpacity={0.7}>
-                        <Ionicons name="close-circle" size={16} color="#FFFFFF" />
+                        <XCircle size={16} color="#FFFFFF" />
                       </TouchableOpacity>
                     </View>
                   ))}
@@ -861,7 +860,7 @@ const saveAuthor = useCallback(() => {
                     onPress={openTagsModal}
                     activeOpacity={0.7}
                   >
-                    <Ionicons name="add" size={20} color={theme.colors.text} />
+                    <Plus size={20} color={theme.colors.text} />
                   </TouchableOpacity>
                 </View>
                 <View style={styles.compactRow}>
@@ -879,9 +878,9 @@ const saveAuthor = useCallback(() => {
                     {pendingKey === 'topics' ? (
                       <ActivityIndicator size="small" color="#FFFFFF" />
                     ) : lastSavedKey === 'topics' ? (
-                      <Ionicons name="checkmark" size={20} color="#FFFFFF" />
+                      <Check size={20} color="#FFFFFF" />
                     ) : (
-                      <Ionicons name="save" size={20} color="#FFFFFF" />
+                      <Save size={20} color="#FFFFFF" />
                     )}
                   </TouchableOpacity>
                 </View>
@@ -908,7 +907,7 @@ const saveAuthor = useCallback(() => {
                           Выберите теги
                         </Typography>
                         <TouchableOpacity onPress={closeTagsModal} activeOpacity={0.7}>
-                          <Ionicons name="close" size={24} color={theme.colors.text} />
+                          <X size={24} color={theme.colors.text} />
                         </TouchableOpacity>
                       </View>
                       <ScrollView style={styles.tagsModalScroll}>
@@ -949,7 +948,7 @@ const saveAuthor = useCallback(() => {
                         onPress={confirmTagsSelection}
                         activeOpacity={0.8}
                       >
-                        <Ionicons name="checkmark" size={24} color="#FFFFFF" />
+                        <Check size={24} color="#FFFFFF" />
                         <Typography variant="body" weight="bold" style={{ color: '#FFFFFF' }}>
                           Подтвердить выбор
                         </Typography>
@@ -972,11 +971,11 @@ const saveAuthor = useCallback(() => {
                     onPress={() => setShowSubtitlesEditor(!showSubtitlesEditor)}
                     activeOpacity={0.7}
                   >
-                    <Ionicons
-                      name={showSubtitlesEditor ? "chevron-up" : "create-outline"}
-                      size={20}
-                      color={showSubtitlesEditor ? "#FFFFFF" : theme.colors.text}
-                    />
+                    {showSubtitlesEditor ? (
+                      <ChevronUp size={20} color="#FFFFFF" />
+                    ) : (
+                      <Edit3 size={20} color={theme.colors.text} />
+                    )}
                     <Typography
                       variant="body"
                       style={{ color: showSubtitlesEditor ? "#FFFFFF" : theme.colors.text }}
@@ -1005,7 +1004,7 @@ const saveAuthor = useCallback(() => {
                         Фрагмент {index + 1}
                       </Typography>
                       <TouchableOpacity onPress={() => removeCaptionRow(row.id)} activeOpacity={0.7}>
-                        <Ionicons name="trash-outline" size={18} color={theme.colors.textSecondary} />
+                        <Trash2 size={18} color={theme.colors.textSecondary} />
                       </TouchableOpacity>
                     </View>
                     <RowTimes
@@ -1046,7 +1045,7 @@ const saveAuthor = useCallback(() => {
                   onPress={addCaptionRow}
                   activeOpacity={0.8}
                 >
-                  <Ionicons name="add" size={18} color={theme.colors.text} />
+                  <Plus size={18} color={theme.colors.text} />
                   <Typography variant="body" style={{ color: theme.colors.text }}>
                     Добавить фрагмент
                   </Typography>
@@ -1080,11 +1079,11 @@ const saveAuthor = useCallback(() => {
                     onPress={() => setShowExercisesEditor(!showExercisesEditor)}
                     activeOpacity={0.7}
                   >
-                    <Ionicons
-                      name={showExercisesEditor ? "chevron-up" : "create-outline"}
-                      size={20}
-                      color={showExercisesEditor ? "#FFFFFF" : theme.colors.text}
-                    />
+                    {showExercisesEditor ? (
+                      <ChevronUp size={20} color="#FFFFFF" />
+                    ) : (
+                      <Edit3 size={20} color={theme.colors.text} />
+                    )}
                     <Typography
                       variant="body"
                       style={{ color: showExercisesEditor ? "#FFFFFF" : theme.colors.text }}
@@ -1110,7 +1109,7 @@ const saveAuthor = useCallback(() => {
                         Упражнение {index + 1}
                       </Typography>
                       <TouchableOpacity onPress={() => removeExercise(exercise.id)} activeOpacity={0.7}>
-                        <Ionicons name="trash-outline" size={18} color={theme.colors.textSecondary} />
+                        <Trash2 size={18} color={theme.colors.textSecondary} />
                       </TouchableOpacity>
                     </View>
                     <View style={styles.optionRow}>
@@ -1175,7 +1174,7 @@ const saveAuthor = useCallback(() => {
                               onPress={() => updateExercise(exercise.id, { correctAnswer: optionIndex })}
                               activeOpacity={0.7}
                             >
-                              {isCorrect && <Ionicons name="checkmark" size={12} color="#FFFFFF" />}
+                              {isCorrect && <Check size={12} color="#FFFFFF" />}
                             </TouchableOpacity>
                             <TextInput
                               value={option}
@@ -1200,7 +1199,7 @@ const saveAuthor = useCallback(() => {
                                 style={styles.optionRemove}
                                 activeOpacity={0.7}
                               >
-                                <Ionicons name="remove-circle-outline" size={20} color={theme.colors.textSecondary} />
+                                <MinusCircle size={20} color={theme.colors.textSecondary} />
                               </TouchableOpacity>
                             )}
                           </View>
@@ -1214,7 +1213,7 @@ const saveAuthor = useCallback(() => {
                         onPress={() => addExerciseOption(exercise.id)}
                         activeOpacity={0.8}
                       >
-                        <Ionicons name="add" size={16} color={theme.colors.text} />
+                        <Plus size={16} color={theme.colors.text} />
                         <Typography variant="caption" style={{ color: theme.colors.text }}>
                           Добавить вариант
                         </Typography>
@@ -1230,7 +1229,7 @@ const saveAuthor = useCallback(() => {
                   onPress={addExercise}
                   activeOpacity={0.8}
                 >
-                  <Ionicons name="add-circle-outline" size={18} color={theme.colors.text} />
+                  <PlusCircle size={18} color={theme.colors.text} />
                   <Typography variant="body" style={{ color: theme.colors.text }}>
                     Добавить упражнение
                   </Typography>

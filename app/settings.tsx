@@ -12,7 +12,7 @@ import { useRouter } from "expo-router";
 import { Typography, PrimaryButton, SurfaceCard } from "@shared/ui";
 import { useThemeMode } from "@shared/theme/ThemeProvider";
 import { SafeAreaView } from "react-native-safe-area-context";
-import Ionicons from "@expo/vector-icons/Ionicons";
+import { X } from "lucide-react-native";
 import { useTheme } from "styled-components/native";
 import { roleDisplayName } from "@shared/constants/roles";
 
@@ -42,7 +42,7 @@ export default function SettingsScreen() {
           Настройки
         </Typography>
         <TouchableOpacity onPress={handleClose} style={styles.closeButton}>
-          <Ionicons name="close" size={28} color={theme.colors.text} />
+          <X size={28} color={theme.colors.text} />
         </TouchableOpacity>
       </View>
 
@@ -97,7 +97,7 @@ export default function SettingsScreen() {
               <Switch
                 value={mode === "dark"}
                 onValueChange={toggle}
-                trackColor={{ false: "#E5E7EB", true: "#1E88E5" }}
+                trackColor={{ false: "#E5E7EB", true: theme.colors.primary }}
                 thumbColor={mode === "dark" ? "#FFFFFF" : "#F3F4F6"}
               />
             </View>
@@ -116,7 +116,7 @@ const getStyles = (theme: any) =>
   StyleSheet.create({
     container: {
       flex: 1,
-      backgroundColor: theme.colors.backgroundAlt,
+      backgroundColor: theme.colors.background,
     },
     header: {
       flexDirection: "row",
