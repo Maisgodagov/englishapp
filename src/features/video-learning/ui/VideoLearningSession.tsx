@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Animated,
   Pressable,
@@ -31,7 +31,7 @@ interface VideoLearningSessionProps {
   onNextVideo?: () => void;
 }
 
-export const VideoLearningSession = ({
+const VideoLearningSessionComponent = ({
   content,
   submitStatus,
   lastSubmission,
@@ -164,9 +164,9 @@ export const VideoLearningSession = ({
     dataUsageTracker.handleBandwidthUpdate(data);
   }, [dataUsageTracker]);
 
-  const handleVideoError = useCallback((error: any) => {
-    console.error(`[VideoLearningSession ${content.id}] ❌ Video error:`, error);
-  }, [content.id]);
+  const handleVideoError = useCallback(() => {
+    // Ignore errors
+  }, []);
 
   const clearTimer = useCallback(() => {
     if (timerRef.current) {
@@ -868,3 +868,5 @@ const styles = StyleSheet.create({
     marginTop: 16,
   },
 });
+
+export const VideoLearningSession = memo(VideoLearningSessionComponent);

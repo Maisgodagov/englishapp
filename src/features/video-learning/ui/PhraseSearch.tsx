@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect, useRef, useMemo } from "react";
+import React, { memo, useState, useCallback, useEffect, useRef, useMemo } from "react";
 
 import {
   ActivityIndicator,
@@ -198,11 +198,8 @@ const ensureSnippetCacheDir = async () => {
     });
 
     snippetCacheDirReady = true;
-  } catch (error) {
-    console.warn(
-      "[PhraseSearch] Failed to prepare snippet cache directory:",
-      error
-    );
+  } catch {
+    // Ignore errors
   }
 };
 
@@ -413,15 +410,9 @@ const VideoSnippetItem: React.FC<VideoSnippetItemProps> = ({
         if (isMounted) {
           setPlaylistUri(fileUri);
         }
-      } catch (error) {
-        console.error(
-          `[PhraseSearch] Failed to prepare snippet playlist (${snippet.id})`,
-          error
-        );
-
+      } catch {
         if (isMounted) {
           setPlaylistError("Не удалось подготовить видео");
-
           setPlaylistUri(null);
         }
       } finally {
@@ -525,14 +516,8 @@ const VideoSnippetItem: React.FC<VideoSnippetItemProps> = ({
               bufferConfig={bufferConfig}
               maxBitRate={2_000_000}
               onLoad={() => setReady(true)}
-              onError={(error) => {
-                console.error(
-                  `[PhraseSearch] Snippet playback error (${snippet.id})`,
-                  error
-                );
-
+              onError={() => {
                 setPlaylistError("Не удалось воспроизвести видео");
-
                 setReady(false);
               }}
 
@@ -614,7 +599,7 @@ const VideoSnippetItem: React.FC<VideoSnippetItemProps> = ({
   );
 };
 
-export const PhraseSearch = () => {
+const PhraseSearchComponent = () => {
   const theme = useTheme() as AppTheme;
 
   const profile = useAppSelector((state) => state.user.profile);
@@ -708,8 +693,6 @@ export const PhraseSearch = () => {
         setIsFetchingMore(true);
       }
 
-      console.log("[PhraseSearch] request start", { mode, cursor });
-
       const controller = new AbortController();
 
       abortControllerRef.current?.abort();
@@ -721,12 +704,6 @@ export const PhraseSearch = () => {
         let duplicateAttempts = 0;
 
         while (true) {
-          console.log("[PhraseSearch] fetch page", {
-            mode,
-            cursor: cursorToUse,
-            duplicateAttempts,
-          });
-
           const response = await videoLearningApi.searchPhrase({
             phrase: searchValue,
 
@@ -782,15 +759,7 @@ export const PhraseSearch = () => {
                 duplicateAttempts < MAX_DUPLICATE_FETCH_ATTEMPTS
               ) {
                 cursorToUse = response.nextCursor;
-
                 duplicateAttempts += 1;
-
-                console.log("[PhraseSearch] duplicate page, retrying", {
-                  mode,
-                  nextCursor: cursorToUse,
-                  duplicateAttempts,
-                });
-
                 continue;
               }
 
@@ -808,23 +777,11 @@ export const PhraseSearch = () => {
             });
 
             applyMetadata(response);
-
-            console.log("[PhraseSearch] appended fresh items", {
-              mode,
-              added: freshItems.length,
-              totalLoaded: snippetsLengthRef.current,
-            });
-
             break;
           }
         }
-
-        console.log("[PhraseSearch] request completed", { mode });
       } catch (err: any) {
         if (err?.name === "AbortError") return;
-
-        console.error("[PhraseSearch] Search failed:", err);
-
         setError("Search failed. Please try again.");
 
         if (mode === "initial") {
@@ -864,11 +821,6 @@ export const PhraseSearch = () => {
       if (remainingAhead >= PREFETCH_THRESHOLD) {
         return;
       }
-      console.log("[PhraseSearch] prefetch enqueue", {
-        baselineIndex,
-        totalLoaded,
-        nextCursor,
-      });
       requestSnippets({
         searchValue: activePhraseRef.current,
         cursor: nextCursor,
@@ -914,11 +866,7 @@ export const PhraseSearch = () => {
           if (translationRequestIdRef.current === translationRequestId) {
             setSearchTranslation(translated);
           }
-        } catch (translationError) {
-          console.warn(
-            "[PhraseSearch] Failed to translate Russian query:",
-            translationError
-          );
+        } catch {
           if (translationRequestIdRef.current === translationRequestId) {
             setSearchTranslation(null);
           }
@@ -932,11 +880,7 @@ export const PhraseSearch = () => {
               setSearchTranslation(translated);
             }
           })
-          .catch((translationError) => {
-            console.warn(
-              "[PhraseSearch] Failed to translate query:",
-              translationError
-            );
+          .catch(() => {
             if (translationRequestIdRef.current === translationRequestId) {
               setSearchTranslation(null);
             }
@@ -955,9 +899,6 @@ export const PhraseSearch = () => {
       prefetchNextSnippet(0);
     } catch (err: any) {
       if (err?.name === "AbortError") return;
-
-      console.error("[PhraseSearch] Search failed:", err);
-
       setError("Search failed. Please try again.");
 
       setLoading(false);
@@ -978,11 +919,8 @@ export const PhraseSearch = () => {
     if (!isScreenFocused) return;
     const nextSnippet = snippets[activeIndex + 1];
     if (!nextSnippet) return;
-    ensureSnippetPlaylistReady(nextSnippet).catch((error) => {
-      console.warn(
-        `[PhraseSearch] Failed to prefetch snippet assets (${nextSnippet.id})`,
-        error
-      );
+    ensureSnippetPlaylistReady(nextSnippet).catch(() => {
+      // Ignore prefetch errors
     });
   }, [activeIndex, snippets, isScreenFocused]);
 
@@ -1444,3 +1382,5 @@ const styles = StyleSheet.create({
     color: "#ffe072",
   },
 });
+
+export const PhraseSearch = memo(PhraseSearchComponent);

@@ -127,10 +127,19 @@ export const VideoFeed = ({
     [insets.top, insets.bottom]
   );
 
-  // Build feed based on view mode
+  // Build feed based on view mode with pre-sliced exercises
   const feedItems: FeedItem[] = useMemo(
-    () => videos.map((content, index) => ({ type: "video", content, index })),
-    [videos]
+    () =>
+      videos.map((content, index) => ({
+        type: "video",
+        content: {
+          ...content,
+          // Pre-slice exercises to avoid doing it in render
+          exercises: content.exercises.slice(0, exerciseCount),
+        },
+        index,
+      })),
+    [videos, exerciseCount]
   );
 
   const currentItem = feedItems[currentIndex];
@@ -166,8 +175,8 @@ export const VideoFeed = ({
       try {
         list.scrollToIndex({ index: targetIndex, animated: true });
         onClearFocus?.();
-      } catch (error) {
-        console.warn("[VideoFeed] Failed to scroll to focused video:", error);
+      } catch {
+        // Ignore scroll errors
       }
     });
   }, [focusVideoId, feedItems, onClearFocus]);
@@ -176,17 +185,6 @@ export const VideoFeed = ({
     currentIndexRef.current = currentIndex;
   }, [currentIndex]);
 
-  // Filter exercises based on count setting
-  const getFilteredExercises = useCallback(
-    (content: VideoContent) => {
-      // Take minimum of exerciseCount and available exercises
-      return content.exercises.slice(
-        0,
-        Math.min(exerciseCount, content.exercises.length)
-      );
-    },
-    [exerciseCount]
-  );
 
   // Check if user can scroll down
   // Returns: { canScroll: boolean, reason: 'end' | 'exercises' | null }
@@ -347,6 +345,10 @@ export const VideoFeed = ({
     [onSubmitExercises]
   );
 
+  const handleShowModeration = useCallback(() => {
+    setShowModeration(true);
+  }, []);
+
   useEffect(() => {
     if (videos.length > previousVideoCountRef.current) {
       previousVideoCountRef.current = videos.length;
@@ -374,11 +376,6 @@ export const VideoFeed = ({
       const isActive = index === currentIndex;
       const isCompleted = completedVideoIds.has(item.content.id);
       const shouldPrefetch = prefetchVideoIndex === item.index;
-      const filteredExercises = getFilteredExercises(item.content);
-      const exerciseSubmission =
-        lastSubmission && lastSubmission.contentId === item.content.id
-          ? lastSubmission
-          : undefined;
 
       return (
         <VideoFeedItem
@@ -387,24 +384,18 @@ export const VideoFeed = ({
           isActive={isActive}
           isCompleted={isCompleted}
           onToggleLike={onToggleLike}
-          isLikePending={Boolean(likesUpdating[item.content.id])}
+          isLikePending={!!likesUpdating[item.content.id]}
           isTabFocused={isTabFocused}
           shouldPrefetch={shouldPrefetch}
           prefetchCancelled={prefetchCancelledRef.current}
-          onOpenModeration={isActive ? () => setShowModeration(true) : undefined}
+          onOpenModeration={isActive ? handleShowModeration : undefined}
           onOpenSettings={handleOpenSettings}
-          exercises={filteredExercises}
-          onSubmitExercises={(answers) => handleSubmit(item.content.id, answers)}
+          exercises={item.content.exercises}
+          onSubmitExercises={handleSubmit}
           submitStatus={submitStatus}
           onDrawerStateChange={isActive ? setIsAnyDrawerOpen : undefined}
           exerciseSubmission={
-            exerciseSubmission
-              ? {
-                  completed: exerciseSubmission.completed,
-                  correct: exerciseSubmission.correct,
-                  total: exerciseSubmission.total,
-                }
-              : undefined
+            lastSubmission?.contentId === item.content.id ? lastSubmission : undefined
           }
         />
       );
@@ -412,8 +403,8 @@ export const VideoFeed = ({
     [
       currentIndex,
       completedVideoIds,
-      getFilteredExercises,
       handleOpenSettings,
+      handleShowModeration,
       handleSubmit,
       isTabFocused,
       lastSubmission,

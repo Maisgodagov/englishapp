@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { memo, useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -195,7 +195,7 @@ const normalizeExercise = (exercise: Exercise): EditableExercise => ({
   word: exercise.type === 'vocabulary' ? exercise.word ?? '' : undefined,
 });
 
-export const VideoModerationModal = ({ visible, onClose, video }: VideoModerationModalProps) => {
+const VideoModerationModalComponent = ({ visible, onClose, video }: VideoModerationModalProps) => {
   const insets = useSafeAreaInsets();
   const theme = useTheme() as any;
   const dispatch = useAppDispatch();
@@ -254,8 +254,8 @@ export const VideoModerationModal = ({ visible, onClose, video }: VideoModeratio
       try {
         const authors = await videoModerationApi.getAuthors(profile.id, profile.role);
         setAllAuthors(authors.map(a => a.username));
-      } catch (error) {
-        console.error('Failed to load authors:', error);
+      } catch {
+        // Ignore errors
       }
     };
     loadAuthors();
@@ -727,7 +727,6 @@ const saveAuthor = useCallback(() => {
             styles.modal,
             {
               height: modalHeight,
-              backgroundColor: theme.colors.background,
               paddingBottom: Math.max(insets.bottom, 16),
             },
           ]}
@@ -1505,10 +1504,11 @@ const styles = StyleSheet.create({
   },
   modal: {
     width: '100%',
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
+    borderTopLeftRadius: 26,
+    borderTopRightRadius: 26,
     paddingTop: 20,
-    paddingHorizontal: 20,
+    paddingHorizontal: 22,
+    backgroundColor: '#FFFFFF',
   },
   header: {
     flexDirection: 'row',
@@ -1538,10 +1538,10 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   optionChip: {
-    paddingHorizontal: 16,
-    paddingVertical: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
     borderRadius: 12,
-    borderWidth: 1,
+    borderWidth: 0,
   },
   successLabel: {
     color: '#22C55E',
@@ -1552,9 +1552,9 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   topicToggle: {
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    borderWidth: 1,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderWidth: 0,
     borderRadius: 12,
   },
   textInput: {
@@ -1653,9 +1653,9 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
   },
   actionButton: {
-    borderRadius: 12,
-    borderWidth: 1,
-    paddingVertical: 14,
+    borderRadius: 14,
+    borderWidth: 0,
+    paddingVertical: 12,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -1693,10 +1693,10 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingVertical: 14,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
     borderRadius: 12,
-    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    backgroundColor: 'rgba(0, 0, 0, 0.08)',
     borderWidth: 0,
   },
   saveIconButton: {
@@ -1820,5 +1820,4 @@ const styles = StyleSheet.create({
   },
 });
 
-
-
+export const VideoModerationModal = memo(VideoModerationModalComponent);

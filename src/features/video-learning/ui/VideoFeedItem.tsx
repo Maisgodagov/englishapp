@@ -59,6 +59,7 @@ import { ModerationFilterButton } from "./ModerationFilterButton";
 import { videoModerationApi } from "../api/videoModerationApi";
 import { SubtitleChunkEditor } from "./SubtitleChunkEditor";
 import { ExerciseOverlay } from "./ExerciseOverlay";
+import { exercisesApi } from "../../exercises/api/exercisesApi";
 import {
   selectIsAdmin,
   selectUserProfile,
@@ -214,6 +215,27 @@ const VideoFeedItemComponent = ({
     return spaceFromScreenTop - (insets.top + 2);
   }, [CONTAINER_HEIGHT, drawerHeight, insets.top]);
 
+  const videoBottomOffset = useMemo(
+    () => Math.max(CONTAINER_HEIGHT - VIDEO_HEIGHT, 0),
+    [CONTAINER_HEIGHT, VIDEO_HEIGHT]
+  );
+
+  const subtitleContainerStyle = useMemo(
+    () =>
+      isExerciseDrawerOpen
+        ? {
+            position: "absolute",
+            bottom: videoBottomOffset + 16,
+            left: 0,
+            right: 0,
+            alignItems: "center",
+            paddingHorizontal: 0,
+            zIndex: 220,
+          }
+        : null,
+    [isExerciseDrawerOpen, videoBottomOffset]
+  );
+
   const targetVideoScale = useMemo(() => {
     const clippedVideoHeight = VIDEO_HEIGHT - 120;
     return availableVideoSpace / clippedVideoHeight;
@@ -357,6 +379,46 @@ const VideoFeedItemComponent = ({
   // Роли
   const isAdmin = useAppSelector(selectIsAdmin);
   const profile = useAppSelector(selectUserProfile);
+
+  // Exercise word actions
+  const handleMarkKnown = useCallback(
+    async (wordId: number) => {
+      if (!profile?.id) return;
+      try {
+        await exercisesApi.markKnown(profile.id, { wordId });
+      } catch {
+        // Ignore errors
+      }
+    },
+    [profile?.id]
+  );
+
+  const handleAddToVocab = useCallback(
+    async (wordId: number) => {
+      if (!profile?.id) return;
+      try {
+        await exercisesApi.addToVocab(profile.id, { wordId });
+        Alert.alert('Успешно', 'Слово добавлено в словарь');
+      } catch {
+        Alert.alert('Ошибка', 'Не удалось добавить слово в словарь');
+      }
+    },
+    [profile?.id]
+  );
+
+  const handlePlayWord = useCallback((timestamp: [number, number]) => {
+    if (!videoRef.current) return;
+    const [startTime] = timestamp;
+    videoRef.current.seek(startTime);
+    setIsPlaying(true);
+  }, []);
+
+  const handleSubmitExercises = useCallback(
+    (answers: SubmitAnswerPayload[]) => {
+      onSubmitExercises(content.id, answers);
+    },
+    [onSubmitExercises, content.id]
+  );
 
   const [transcriptChunks, setTranscriptChunks] = useState<TranscriptChunk[]>(
     () => content.transcription?.chunks ?? []
@@ -507,8 +569,7 @@ const VideoFeedItemComponent = ({
       setTranslationChunks(updated.translation?.chunks ?? []);
       setSubtitleEditorState(null);
       resumePlaybackAfterEditor();
-    } catch (error) {
-      console.error("Не удалось обновить субтитры", error);
+    } catch {
       Alert.alert(
         "Ошибка",
         "Не удалось сохранить субтитры. Пожалуйста, попробуйте еще раз."
@@ -567,8 +628,7 @@ const VideoFeedItemComponent = ({
   }, []);
 
   const handleVideoError = useCallback(
-    (error: any) => {
-      console.error(`Видео ${content.id}. Ошибка:`, error);
+    () => {
       setHasError(true);
       setIsVideoReady(false);
     },
@@ -934,6 +994,19 @@ const VideoFeedItemComponent = ({
               ]}
             />
           )}
+          {isExerciseDrawerOpen && activeTranscript && (
+            <View style={styles.subtitleOverlayVideo} pointerEvents="none">
+              <View style={[styles.subtitleBox, styles.subtitleBoxOverlay]}>
+                <Typography
+                  variant="body"
+                  style={styles.subtitleEnOverlay}
+                  enableWordLookup={true}
+                >
+                  {activeTranscript.text}
+                </Typography>
+              </View>
+            </View>
+          )}
         </Reanimated.View>
       </View>
 
@@ -972,9 +1045,10 @@ const VideoFeedItemComponent = ({
         ]}
         pointerEvents="box-none"
       >
-        {((showEnglishSubtitles && activeTranscript) ||
-          (showRussianSubtitles && activeTranslation)) && (
-          <View style={styles.subtitleContainer}>
+        {!isExerciseDrawerOpen &&
+          ((showEnglishSubtitles && activeTranscript) ||
+            (showRussianSubtitles && activeTranslation)) && (
+          <View style={[styles.subtitleContainer, subtitleContainerStyle]}>
             {isAdmin && showEnglishSubtitles && activeTranscript && (
               <TouchableOpacity
                 style={styles.subtitleEditButton}
@@ -998,7 +1072,7 @@ const VideoFeedItemComponent = ({
                 </View>
               </View>
             )}
-            {showRussianSubtitles && activeTranslation && (
+            {showRussianSubtitles && !isExerciseDrawerOpen && activeTranslation && (
               <View style={[styles.subtitleBox, styles.subtitleBoxRu]}>
                 <Typography
                   variant="body"
@@ -1072,10 +1146,14 @@ const VideoFeedItemComponent = ({
             <View style={styles.exerciseDrawerHandle} />
             <ExerciseOverlay
               exercises={exercises}
-              onSubmit={onSubmitExercises}
+              onSubmit={handleSubmitExercises}
               submitStatus={submitStatus}
               lastSubmission={exerciseSubmission}
               height={exerciseOverlayHeight}
+              onMarkKnown={handleMarkKnown}
+              onAddToVocab={handleAddToVocab}
+              onPlayWord={handlePlayWord}
+              onClose={closeExerciseDrawer}
             />
           </Animated.View>
         </>
@@ -1298,6 +1376,7 @@ const styles = StyleSheet.create({
     backgroundColor: "transparent",
     justifyContent: "flex-end",
     paddingHorizontal: 20,
+    zIndex: 190,
   },
   completedBadge: {
     position: "absolute",
@@ -1330,8 +1409,9 @@ const styles = StyleSheet.create({
   subtitleContainer: {
     gap: 12,
     marginBottom: 10,
-    zIndex: 5,
+    zIndex: 200,
     position: "relative",
+    alignItems: "center",
   },
   subtitleRow: {
     flexDirection: "row",
@@ -1346,12 +1426,36 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     borderRadius: 12,
     alignSelf: "center",
-    maxWidth: "95%",
+    maxWidth: SCREEN_WIDTH - 40,
     elevation: 4,
     shadowColor: "#000",
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.5,
     shadowRadius: 4,
+  },
+  subtitleOverlayVideo: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    bottom: 8,
+    alignItems: "center",
+    zIndex: 400,
+    elevation: 400,
+    paddingHorizontal: 0,
+  },
+  subtitleBoxOverlay: {
+    maxWidth: SCREEN_WIDTH,
+    width: SCREEN_WIDTH,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 14,
+  },
+  subtitleEnOverlay: {
+    fontSize: 27,
+    fontWeight: "700",
+    color: "#FFFFFF",
+    textAlign: "center",
+    includeFontPadding: false,
   },
   subtitleEditButton: {
     position: "absolute",
@@ -1464,7 +1568,7 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     bottom: 0,
-    backgroundColor: "#F4F6FB",
+    backgroundColor: "#FFFFFF",
     borderTopLeftRadius: 28,
     borderTopRightRadius: 28,
     paddingHorizontal: 0,
@@ -1477,7 +1581,7 @@ const styles = StyleSheet.create({
     width: 46,
     height: 5,
     borderRadius: 999,
-    backgroundColor: "rgba(0,0,0,0.18)",
+    backgroundColor: "rgba(0,0,0,0.12)",
     marginTop: 4,
     marginBottom: 8,
   },

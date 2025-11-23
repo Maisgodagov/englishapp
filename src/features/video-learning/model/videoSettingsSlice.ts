@@ -1,7 +1,7 @@
 import { createSelector, createSlice, PayloadAction } from '@reduxjs/toolkit';
 import type { RootState } from '@core/store/store';
 
-export type ExerciseCount = 1 | 2 | 3 | 4;
+export type ExerciseCount = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 15 | 20 | 25 | 30 | 35 | 40;
 export type DifficultyLevel = 'all' | 'easy' | 'medium' | 'hard';
 export type SpeechSpeed = 'all' | 'slow' | 'normal' | 'fast';
 export type ModerationFilter = 'all' | 'moderated' | 'unmoderated';
@@ -17,7 +17,7 @@ interface VideoSettingsState {
 }
 
 const initialState: VideoSettingsState = {
-  exerciseCount: 3,
+  exerciseCount: 40,
   showEnglishSubtitles: true,
   showRussianSubtitles: true,
   difficultyLevel: 'all',

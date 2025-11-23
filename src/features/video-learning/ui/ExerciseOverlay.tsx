@@ -1,21 +1,25 @@
-import { useCallback, useEffect, useRef, useState, useMemo } from "react";
+import { memo, useCallback, useEffect, useRef, useState, useMemo } from "react";
 import { ScrollView, StyleSheet, TouchableOpacity, View } from "react-native";
 import { useTheme } from "styled-components/native";
-import { CheckCircle, XCircle, Trophy, BarChart3, ChevronDown } from "lucide-react-native";
+import { Check, X as XIcon, Trophy, BarChart3, ChevronDown, Volume2, BookmarkPlus, X, Play, Plus } from "lucide-react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { Typography } from "@shared/ui";
-import type { Exercise, SubmitAnswerPayload } from "../api/videoLearningApi";
+import type { SubmitAnswerPayload } from "../api/videoLearningApi";
+import type { UiExerciseWithMeta } from "../../exercises/lib/exerciseAdapter";
 import { SCREEN_WIDTH, getContentHeight } from "@shared/utils/dimensions";
 const WRONG_FEEDBACK_DELAY = 2000;
 const CORRECT_FEEDBACK_DELAY = 800;
-
 interface ExerciseOverlayProps {
-  exercises: Exercise[];
+  exercises: UiExerciseWithMeta[];
   onSubmit: (answers: SubmitAnswerPayload[]) => void;
   submitStatus: "idle" | "submitting" | "succeeded" | "failed";
   lastSubmission?: { completed: boolean; correct: number; total: number };
   height?: number;
+  onMarkKnown?: (wordId: number) => void;
+  onAddToVocab?: (wordId: number) => void;
+  onPlayWord?: (timestamp: [number, number]) => void;
+  onClose?: () => void;
 }
 
 const withAlpha = (color: string | undefined, alphaHex: string) => {
@@ -43,121 +47,60 @@ const pickOverlayColor = (
   return isDark ? fallbackDark : fallbackLight;
 };
 
-export const ExerciseOverlay = ({
+const ExerciseOverlayComponent = ({
   exercises,
   onSubmit,
   submitStatus,
   lastSubmission,
   height,
+  onMarkKnown,
+  onAddToVocab,
+  onPlayWord,
+  onClose,
 }: ExerciseOverlayProps) => {
   const theme = useTheme() as any;
   const insets = useSafeAreaInsets();
   const timerRef = useRef<NodeJS.Timeout | null>(null);
-  const isDark =
-    theme?.dark ?? (theme?.colors?.background ?? "").toLowerCase?.() === "#0f172a";
-  const primary = theme.colors.primary;
-  const success = theme.colors.success ?? "#22C55E";
-  const danger = theme.colors.danger ?? "#EF4444";
-  const cardBackground = pickOverlayColor(
-    theme.colors.surface,
-    "24",
-    "rgba(255,255,255,0.08)",
-    "rgba(0,0,0,0.06)",
-    isDark
-  );
-  const cardBorder = pickOverlayColor(
-    theme.colors.border,
-    "80",
-    "rgba(255,255,255,0.18)",
-    "rgba(0,0,0,0.12)",
-    isDark
-  );
-  const optionBaseBackground = pickOverlayColor(
-    theme.colors.surface,
-    "1A",
-    "rgba(255,255,255,0.05)",
-    "rgba(0,0,0,0.04)",
-    isDark
-  );
-  const optionBorder = pickOverlayColor(
-    theme.colors.border,
-    "6A",
-    "rgba(255,255,255,0.12)",
-    "rgba(0,0,0,0.08)",
-    isDark
-  );
-  const optionSelectedBackground = pickOverlayColor(
-    primary,
-    "33",
-    "rgba(255,255,255,0.14)",
-    "rgba(0,0,0,0.08)",
-    isDark
-  );
-  const optionBadgeBackground = pickOverlayColor(
-    primary,
-    "28",
-    "rgba(255,255,255,0.12)",
-    "rgba(0,0,0,0.08)",
-    isDark
-  );
-  const optionCorrectBackground = pickOverlayColor(
-    success,
-    "26",
-    "rgba(34,197,94,0.18)",
-    "rgba(34,197,94,0.14)",
-    isDark
-  );
-  const optionDangerBackground = pickOverlayColor(
-    danger,
-    "26",
-    "rgba(239,68,68,0.18)",
-    "rgba(239,68,68,0.14)",
-    isDark
-  );
-  const progressBackdrop = pickOverlayColor(
-    primary,
-    "14",
-    "rgba(255,255,255,0.05)",
-    "rgba(0,0,0,0.04)",
-    isDark
-  );
-  const feedbackSuccessBackground = pickOverlayColor(
-    success,
-    "26",
-    "rgba(34,197,94,0.14)",
-    "rgba(34,197,94,0.12)",
-    isDark
-  );
-  const feedbackDangerBackground = pickOverlayColor(
-    danger,
-    "26",
-    "rgba(239,68,68,0.14)",
-    "rgba(239,68,68,0.12)",
-    isDark
-  );
-  const resultsBackground = pickOverlayColor(
-    theme.colors.surface,
-    "20",
-    "rgba(255,255,255,0.1)",
-    "rgba(0,0,0,0.06)",
-    isDark
-  );
-  const resultsBorder = pickOverlayColor(
-    theme.colors.border,
-    "7F",
-    "rgba(255,255,255,0.18)",
-    "rgba(0,0,0,0.12)",
-    isDark
-  );
-  const inactiveProgressColor = pickOverlayColor(
-    theme.colors.border,
-    "70",
-    "rgba(255,255,255,0.15)",
-    "rgba(0,0,0,0.14)",
-    isDark
-  );
-  const textPrimary = theme.colors.text ?? "#FFFFFF";
-  const surface = theme.colors.surface ?? (isDark ? "#0A0D16" : "#FFFFFF");
+  const closeTimerRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Memoize all theme colors to avoid recalculation on every render
+  const themeColors = useMemo(() => {
+    const isDark = theme?.dark ?? (theme?.colors?.background ?? "").toLowerCase?.() === "#0f172a";
+    const primary = theme.colors.primary;
+    const success = theme.colors.success ?? "#22C55E";
+    const danger = theme.colors.danger ?? "#EF4444";
+    const textPrimary = theme.colors.text ?? "#FFFFFF";
+
+    return {
+      isDark,
+      primary,
+      success,
+      danger,
+      cardBackground: "transparent",
+      cardBorder: "transparent",
+      optionBaseBackground: pickOverlayColor(theme.colors.text, "14", "rgba(255,255,255,0.14)", "rgba(0,0,0,0.08)", isDark),
+      optionBorder: "transparent",
+      optionSelectedBackground: pickOverlayColor(primary, "32", "rgba(255,255,255,0.32)", "rgba(0,0,0,0.18)", isDark),
+      optionBadgeBackground: pickOverlayColor(primary, "28", "rgba(255,255,255,0.12)", "rgba(0,0,0,0.08)", isDark),
+      optionCorrectBackground: pickOverlayColor(success, "32", "rgba(34,197,94,0.32)", "rgba(34,197,94,0.18)", isDark),
+      optionDangerBackground: pickOverlayColor(danger, "32", "rgba(239,68,68,0.32)", "rgba(239,68,68,0.18)", isDark),
+      progressBackdrop: pickOverlayColor(primary, "14", "rgba(255,255,255,0.05)", "rgba(0,0,0,0.04)", isDark),
+      feedbackSuccessBackground: pickOverlayColor(success, "32", "rgba(34,197,94,0.32)", "rgba(34,197,94,0.18)", isDark),
+      feedbackDangerBackground: pickOverlayColor(danger, "32", "rgba(239,68,68,0.32)", "rgba(239,68,68,0.18)", isDark),
+      resultsBackground: pickOverlayColor(theme.colors.text, "22", "rgba(255,255,255,0.22)", "rgba(0,0,0,0.08)", isDark),
+      resultsBorder: "transparent",
+      inactiveProgressColor: pickOverlayColor(theme.colors.border, "70", "rgba(255,255,255,0.15)", "rgba(0,0,0,0.14)", isDark),
+      textPrimary,
+      surface: theme.colors.surface ?? (isDark ? "#0A0D16" : "#FFFFFF"),
+    };
+  }, [theme]);
+
+  // Memoize text style objects to prevent recreation
+  const textStyles = useMemo(() => ({
+    optionText: [styles.optionText, { color: themeColors.textPrimary }],
+    resultsScore: [styles.resultsScore, { color: themeColors.textPrimary }],
+    swipeNextText: [styles.swipeNextText, { color: themeColors.textPrimary }],
+  }), [themeColors]);
 
   const [answers, setAnswers] = useState<Record<string, number>>({});
   const [currentExerciseIndex, setCurrentExerciseIndex] = useState(0);
@@ -187,42 +130,100 @@ export const ExerciseOverlay = ({
       if (!exercise) return;
 
       const isCorrect = optionIndex === exercise.correctAnswer;
-      const updatedAnswers = { ...answers, [exercise.id]: optionIndex };
-      setAnswers(updatedAnswers);
+      // Use functional update to avoid dependency on answers
+      setAnswers((prevAnswers) => {
+        const updatedAnswers = { ...prevAnswers, [exercise.id]: optionIndex };
+
+        // Schedule submission in the timeout
+        clearTimer();
+        timerRef.current = setTimeout(
+          () => {
+            setFeedback(null);
+            setIsLocked(false);
+            if (currentExerciseIndex + 1 < exercises.length) {
+              setCurrentExerciseIndex((prev) => prev + 1);
+            } else {
+              const payload: SubmitAnswerPayload[] = exercises.map((item) => ({
+                exerciseId: item.id,
+                selectedOption: updatedAnswers[item.id] ?? -1,
+              }));
+              onSubmit(payload);
+            }
+            timerRef.current = null;
+          },
+          isCorrect ? CORRECT_FEEDBACK_DELAY : WRONG_FEEDBACK_DELAY
+        );
+
+        return updatedAnswers;
+      });
+
       setIsLocked(true);
       setFeedback({
         type: isCorrect ? "correct" : "incorrect",
         correctAnswer: exercise.correctAnswer,
       });
-
-      clearTimer();
-      timerRef.current = setTimeout(
-        () => {
-          setFeedback(null);
-          setIsLocked(false);
-          if (currentExerciseIndex + 1 < exercises.length) {
-            setCurrentExerciseIndex((prev) => prev + 1);
-          } else {
-            const payload: SubmitAnswerPayload[] = exercises.map((item) => ({
-              exerciseId: item.id,
-              selectedOption: updatedAnswers[item.id] ?? -1,
-            }));
-            onSubmit(payload);
-          }
-          timerRef.current = null;
-        },
-        isCorrect ? CORRECT_FEEDBACK_DELAY : WRONG_FEEDBACK_DELAY
-      );
     },
-    [answers, clearTimer, exercises, currentExerciseIndex, isLocked, onSubmit]
+    [clearTimer, exercises, currentExerciseIndex, onSubmit, isLocked]
   );
+
+  const handleMarkKnownPress = useCallback(() => {
+    const exercise = exercises[currentExerciseIndex];
+    if (!exercise?.wordId) return;
+    onMarkKnown?.(exercise.wordId);
+    // Skip to next exercise
+    if (currentExerciseIndex + 1 < exercises.length) {
+      setCurrentExerciseIndex((prev) => prev + 1);
+    } else {
+      // Use functional state to avoid dependency on answers
+      setAnswers((currentAnswers) => {
+        const payload: SubmitAnswerPayload[] = exercises.map((item) => ({
+          exerciseId: item.id,
+          selectedOption: currentAnswers[item.id] ?? -1,
+        }));
+        onSubmit(payload);
+        return currentAnswers;
+      });
+    }
+  }, [currentExerciseIndex, exercises, onMarkKnown, onSubmit]);
+
+  const handleAddToVocabPress = useCallback(() => {
+    const exercise = exercises[currentExerciseIndex];
+    if (!exercise?.wordId) return;
+    onAddToVocab?.(exercise.wordId);
+  }, [currentExerciseIndex, exercises, onAddToVocab]);
+
+  const handlePlayWordPress = useCallback(() => {
+    const exercise = exercises[currentExerciseIndex];
+    if (!exercise?.timestamp || !onPlayWord) return;
+    onPlayWord(exercise.timestamp);
+  }, [currentExerciseIndex, exercises, onPlayWord]);
 
   useEffect(() => clearTimer, [clearTimer]);
 
-  const currentExercise = exercises[currentExerciseIndex];
+  // Auto-close when all exercises are completed
+  useEffect(() => {
+    if (lastSubmission?.completed && onClose) {
+      closeTimerRef.current = setTimeout(() => {
+        onClose();
+      }, 1000);
+    }
+    return () => {
+      if (closeTimerRef.current) {
+        clearTimeout(closeTimerRef.current);
+        closeTimerRef.current = null;
+      }
+    };
+  }, [lastSubmission?.completed, onClose]);
+
+  // Memoize current exercise to prevent recalculation
+  const currentExercise = useMemo(
+    () => exercises[currentExerciseIndex],
+    [exercises, currentExerciseIndex]
+  );
   const selectedOption = currentExercise
     ? answers[currentExercise.id]
     : undefined;
+
   const totalExercises = exercises.length;
   const localCorrectCount = useMemo(() => {
     if (!totalExercises) {
@@ -244,7 +245,7 @@ export const ExerciseOverlay = ({
       style={[
         styles.container,
         {
-          backgroundColor: surface,
+          backgroundColor: "#FFFFFF",
           height: containerHeight,
         },
       ]}
@@ -257,80 +258,121 @@ export const ExerciseOverlay = ({
         {/* Current Exercise */}
         {currentExercise && !lastSubmission ? (
           <View style={styles.content}>
-            {/* Question */}
-            <View
-              style={[
-                styles.questionCard,
-                {
-                  backgroundColor: cardBackground,
-                  borderColor: cardBorder,
-                },
-              ]}
-            >
-              <Typography variant="body" style={styles.questionNumber}>
-                Вопрос {currentExerciseIndex + 1} из {exercises.length}
-              </Typography>
-              <Typography variant="subtitle" style={styles.questionText}>
-                {currentExercise.question}
-              </Typography>
-              {currentExercise.type === "vocabulary" &&
-                currentExercise.word && (
-                  <View
-                    style={[
-                      styles.wordBadge,
-                      {
-                        backgroundColor: optionBadgeBackground,
-                        borderColor: optionBorder,
-                      },
-                    ]}
-                  >
-                    <Typography
-                      variant="caption"
-                      style={[styles.wordText, { color: primary }]}
-                    >
-                      {currentExercise.word}
-                    </Typography>
-                  </View>
-                )}
-            </View>
+        {/* Question */}
+        <View
+          style={[
+            styles.questionCard,
+            {
+              backgroundColor: themeColors.cardBackground,
+              borderColor: themeColors.cardBorder,
+            },
+          ]}
+        >
+          {/* Skip button hidden for now */}
+          {false && currentExercise.type === "vocabulary" && currentExercise.wordId && !isLocked && (
+            <TouchableOpacity
+                  style={styles.skipButton}
+                  onPress={handleMarkKnownPress}
+                  activeOpacity={0.7}
+                >
+                  <X size={20} color={themeColors.textPrimary} />
+                </TouchableOpacity>
+              )}
 
-            {/* Options */}
+          <Typography
+            variant="caption"
+            style={[styles.questionHint, { color: "#000000" }]}
+            adjustsFontSizeToFit
+            numberOfLines={2}
+          >
+            {currentExercise.question}
+          </Typography>
+
+          {currentExercise.type === "vocabulary" &&
+            ((currentExercise.timestamp && onPlayWord) || currentExercise.wordId) ? (
+            <View style={styles.wordActionsRow}>
+              {currentExercise.timestamp && onPlayWord && (
+                <TouchableOpacity
+                  style={[
+                    styles.wordActionButton,
+                    {
+                      backgroundColor: withAlpha(themeColors.primary, '15'),
+                    },
+                  ]}
+                  onPress={handlePlayWordPress}
+                  activeOpacity={0.7}
+                >
+                  <Play size={18} color={themeColors.primary} fill={themeColors.primary} />
+                  <Typography
+                    variant="caption"
+                    style={[styles.wordActionText, { color: themeColors.primary }]}
+                  >
+                    слушать
+                  </Typography>
+                </TouchableOpacity>
+              )}
+
+              {currentExercise.wordId && (
+                <TouchableOpacity
+                  style={[
+                    styles.wordActionButton,
+                    {
+                      backgroundColor: withAlpha(themeColors.primary, '15'),
+                    },
+                  ]}
+                  onPress={handleAddToVocabPress}
+                  activeOpacity={0.7}
+                >
+                  <Plus size={18} color={themeColors.primary} strokeWidth={2.5} />
+                  <Typography
+                    variant="caption"
+                    style={[styles.wordActionText, { color: themeColors.primary }]}
+                  >
+                    добавить
+                  </Typography>
+                </TouchableOpacity>
+              )}
+            </View>
+          ) : null}
+        </View>
+
+        {/* Options */}
             <View style={styles.optionsContainer}>
               {currentExercise.options.map((option, index) => {
                 const isSelected = selectedOption === index;
-                const showFeedback = Boolean(feedback);
+                const showFeedback = !!feedback;
                 const isCorrectOption = feedback?.correctAnswer === index;
                 const isWrongSelection =
                   showFeedback && isSelected && feedback?.type === "incorrect";
 
-                let borderColor = optionBorder;
-                let backgroundColor = optionBaseBackground;
-                let indicatorBackground = optionBadgeBackground;
-                let indicatorBorder = optionBorder;
-                let indicatorColor = primary;
-                let icon: "check-circle" | "x-circle" | null = null;
-                let iconColor = primary;
+                let borderColor = themeColors.optionBorder;
+                let backgroundColor = themeColors.optionBaseBackground;
+                let indicatorBackground = themeColors.optionBadgeBackground;
+                let indicatorBorder = themeColors.optionBorder;
+                let indicatorColor = themeColors.primary;
+                let icon: "check" | "x" | null = null;
+                let iconColor = themeColors.primary;
 
                 if (isCorrectOption) {
-                  borderColor = success;
-                  backgroundColor = feedbackSuccessBackground;
-                  indicatorBackground = optionCorrectBackground;
-                  indicatorBorder = success;
-                  indicatorColor = success;
-                  icon = "check-circle";
-                  iconColor = success;
+                  borderColor = themeColors.success;
+                  backgroundColor = themeColors.feedbackSuccessBackground;
+                  indicatorBackground = themeColors.optionCorrectBackground;
+                  indicatorBorder = themeColors.success;
+                  indicatorColor = themeColors.success;
+                  icon = "check";
+                  iconColor = themeColors.success;
                 } else if (isWrongSelection) {
-                  borderColor = danger;
-                  backgroundColor = feedbackDangerBackground;
-                  indicatorBackground = optionDangerBackground;
-                  indicatorBorder = danger;
-                  indicatorColor = danger;
-                  icon = "x-circle";
-                  iconColor = danger;
+                  borderColor = themeColors.danger;
+                  backgroundColor = themeColors.feedbackDangerBackground;
+                  indicatorBackground = themeColors.optionDangerBackground;
+                  indicatorBorder = themeColors.danger;
+                  indicatorColor = themeColors.danger;
+                  icon = "x";
+                  iconColor = themeColors.danger;
                 } else if (isSelected) {
-                  borderColor = primary;
-                  backgroundColor = optionSelectedBackground;
-                  indicatorBorder = primary;
+                  borderColor = themeColors.primary;
+                  backgroundColor = themeColors.optionSelectedBackground;
+                  indicatorBorder = themeColors.primary;
                 }
 
                 return (
@@ -351,45 +393,26 @@ export const ExerciseOverlay = ({
                     disabled={isLocked}
                     activeOpacity={0.8}
                   >
-                    <View
-                      style={[
-                        styles.optionBadge,
-                        {
-                          backgroundColor: indicatorBackground,
-                          borderColor: indicatorBorder,
-                        },
-                      ]}
+                    <Typography
+                      variant="body"
+                      style={[textStyles.optionText, { flex: 1 }]}
                     >
-                      <Typography
-                        variant="caption"
-                        style={[
-                          styles.optionBadgeText,
-                          { color: indicatorColor },
-                        ]}
-                      >
-                        {String.fromCharCode(65 + index)}
-                      </Typography>
-                    </View>
-                    <View style={styles.optionInner}>
-                      <Typography
-                        variant="body"
-                        style={[styles.optionText, { color: textPrimary }]}
-                      >
-                        {option}
-                      </Typography>
-                    </View>
+                      {option}
+                    </Typography>
                     {icon && (
-                      icon === "check-circle" ? (
-                        <CheckCircle
-                          size={24}
+                      icon === "check" ? (
+                        <Check
+                          size={22}
                           color={iconColor}
                           style={styles.optionTrailingIcon}
+                          strokeWidth={2.6}
                         />
                       ) : (
-                        <XCircle
-                          size={24}
+                        <XIcon
+                          size={22}
                           color={iconColor}
                           style={styles.optionTrailingIcon}
+                          strokeWidth={2.6}
                         />
                       )
                     )}
@@ -398,38 +421,6 @@ export const ExerciseOverlay = ({
               })}
             </View>
 
-            {/* Feedback message */}
-            {feedback && (
-              <View
-                style={[
-                  styles.feedbackCard,
-                  {
-                    backgroundColor:
-                      feedback.type === "correct"
-                        ? feedbackSuccessBackground
-                        : feedbackDangerBackground,
-                    borderColor: feedback.type === "correct" ? success : danger,
-                  },
-                ]}
-              >
-                {feedback.type === "correct" ? (
-                  <CheckCircle
-                    size={22}
-                    color={success}
-                  />
-                ) : (
-                  <XCircle
-                    size={22}
-                    color={danger}
-                  />
-                )}
-                <Typography variant="body" style={styles.feedbackText}>
-                  {feedback.type === "correct"
-                    ? "Отлично! Правильный ответ!"
-                    : "Неправильно, попробуйте ещё раз"}
-                </Typography>
-              </View>
-            )}
           </View>
         ) : null}
 
@@ -440,77 +431,18 @@ export const ExerciseOverlay = ({
               style={[
                 styles.resultsCard,
                 {
-                  backgroundColor: resultsBackground,
-                  borderColor: resultsBorder,
+                  backgroundColor: "transparent",
+                  borderColor: "transparent",
                 },
               ]}
             >
-              {resultCompleted ? (
-                <Trophy
-                  size={48}
-                  color="#FFD700"
-                />
-              ) : (
-                <BarChart3
-                  size={48}
-                  color={theme.colors.primary}
-                />
-              )}
-              <Typography variant="title" style={styles.resultsTitle}>
-                {resultCompleted
-                  ? "All exercises complete!"
-                  : "Keep practicing!"}
-              </Typography>
-              <Typography
-                variant="body"
-                style={[styles.resultsScore, { color: textPrimary }]}
-              >
-                {resultCorrect} of {resultTotal} correct answers
-              </Typography>
-              <View style={styles.resultsProgress}>
-                <View
-                  style={[
-                    styles.resultsProgressBar,
-                    { backgroundColor: inactiveProgressColor },
-                  ]}
-                >
-                  <View
-                    style={[
-                      styles.resultsProgressFill,
-                      {
-                        width: `${
-                          resultTotal > 0
-                            ? (resultCorrect / resultTotal) * 100
-                            : 0
-                        }%`,
-                        backgroundColor: resultCompleted
-                          ? theme.colors.success ?? "#22C55E"
-                          : theme.colors.primary,
-                      },
-                    ]}
-                  />
-                </View>
-              </View>
-            </View>
-
-            <View
-              style={[
-                styles.swipeNextContainer,
-                {
-                  backgroundColor: progressBackdrop,
-                  borderColor: optionBorder,
-                },
-              ]}
-            >
-              <ChevronDown
-                size={32}
-                color={theme.colors.primary}
+              <Check
+                size={64}
+                color={themeColors.success}
+                strokeWidth={3}
               />
-              <Typography
-                variant="subtitle"
-                style={[styles.swipeNextText, { color: textPrimary }]}
-              >
-                Swipe down to return to the feed
+              <Typography variant="title" style={[styles.resultsTitle, { color: themeColors.textPrimary, marginTop: 16 }]}>
+                Все слова пройдены
               </Typography>
             </View>
           </View>
@@ -524,17 +456,17 @@ const styles = StyleSheet.create({
   container: {
     width: SCREEN_WIDTH,
     flex: 1,
-    paddingHorizontal: 4,
+    paddingHorizontal: 2,
     paddingTop: 2,
   },
   scroll: {
     flex: 1,
   },
   scrollContent: {
-    paddingTop: 6,
-    paddingBottom: 18,
-    paddingHorizontal: 8,
-    gap: 16,
+    paddingTop: 4,
+    paddingBottom: 14,
+    paddingHorizontal: 6,
+    gap: 14,
   },
   header: {
     gap: 4,
@@ -592,44 +524,47 @@ const styles = StyleSheet.create({
     fontSize: 12,
   },
   questionCard: {
-    padding: 16,
-    borderRadius: 16,
+    padding: 14,
+    borderRadius: 12,
     gap: 10,
-    borderWidth: 1,
+    borderWidth: 0,
+    alignItems: "center",
+    position: "relative",
+  },
+  questionHint: {
+    fontSize: 28,
+    lineHeight: 34,
+    fontWeight: "900",
+    opacity: 1,
+    textAlign: "center",
+    marginBottom: 8,
   },
   questionNumber: {
     opacity: 0.6,
     fontSize: 12,
   },
+  questionRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+  },
   questionText: {
+    flex: 1,
     fontSize: 16,
     fontWeight: "700",
     lineHeight: 22,
   },
-  wordBadge: {
-    alignSelf: "flex-start",
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 999,
-    borderWidth: 1,
-    marginTop: 4,
-  },
-  wordText: {
-    fontWeight: "600",
-    letterSpacing: 0.3,
-    fontSize: 12,
-  },
   optionsContainer: {
-    gap: 10,
+    gap: 14,
   },
   option: {
     flexDirection: "row",
     alignItems: "center",
     gap: 12,
-    paddingVertical: 12,
-    paddingHorizontal: 14,
+    paddingVertical: 16,
+    paddingHorizontal: 18,
     borderRadius: 14,
-    borderWidth: 1,
+    borderWidth: 0,
   },
   optionInner: {
     flex: 1,
@@ -649,44 +584,35 @@ const styles = StyleSheet.create({
     fontSize: 13,
   },
   optionText: {
-    fontSize: 15.5,
-    lineHeight: 21,
+    fontSize: 20,
+    lineHeight: 28,
+    fontWeight: "700",
     flexShrink: 1,
   },
   optionTrailingIcon: {
     marginLeft: 6,
   },
-  feedbackCard: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 10,
-    padding: 12,
-    borderRadius: 14,
-    borderWidth: 1,
-  },
-  feedbackText: {
-    flex: 1,
-    fontSize: 14,
-    fontWeight: "600",
-  },
   resultsContainer: {
-    gap: 24,
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
   },
   resultsCard: {
-    paddingVertical: 20,
-    paddingHorizontal: 20,
+    paddingVertical: 32,
+    paddingHorizontal: 24,
     borderRadius: 18,
     alignItems: "center",
+    justifyContent: "center",
     gap: 12,
     borderWidth: 1,
   },
   resultsTitle: {
-    fontSize: 20,
+    fontSize: 24,
     fontWeight: "700",
     textAlign: "center",
   },
   resultsScore: {
-    fontSize: 15,
+    fontSize: 16,
     opacity: 0.75,
     textAlign: "center",
   },
@@ -716,6 +642,57 @@ const styles = StyleSheet.create({
     textAlign: "center",
     fontWeight: "600",
     opacity: 0.85,
-    fontSize: 14,
+    fontSize: 15,
+  },
+  wordActionsRow: {
+    flexDirection: "row",
+    gap: 12,
+    marginTop: 6,
+    paddingHorizontal: 4,
+    justifyContent: "center",
+    alignItems: "center",
+    width: "100%",
+  },
+  wordActionIconButton: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  skipButton: {
+    position: "absolute",
+    top: 10,
+    right: 10,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    alignItems: "center",
+    justifyContent: "center",
+    opacity: 0.7,
+  },
+  skipButtonText: {
+    fontSize: 13,
+    fontWeight: "700",
+  },
+  wordActionIcon: {
+    marginRight: 6,
+  },
+  wordActionButton: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    borderRadius: 12,
+    borderWidth: 0,
+  },
+  wordActionText: {
+    fontSize: 16,
+    fontWeight: "600",
   },
 });
+
+export const ExerciseOverlay = memo(ExerciseOverlayComponent);

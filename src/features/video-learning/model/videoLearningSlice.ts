@@ -11,6 +11,9 @@ import {
   type VideoFeedResponse,
   videoLearningApi,
 } from '../api/videoLearningApi';
+import { exercisesApi } from '../../exercises/api/exercisesApi';
+import { adaptExercisesToUi } from '../../exercises/lib/exerciseAdapter';
+import { wordIdsFromSubtitles } from '../../exercises/lib/subtitlesToWordIds';
 
 interface VideoLearningState {
   feed: VideoFeedItem[];
@@ -275,7 +278,26 @@ export const loadVideoContent = createAsyncThunk<VideoContent, string | undefine
     // If contentId is explicitly provided, use it (e.g., when clicking "Next video")
     const userRole = state.user.profile?.role ?? null;
     if (contentId) {
-      return videoLearningApi.getContent(userId, contentId, userRole);
+      const content = await videoLearningApi.getContent(userId, contentId, userRole);
+      if (content?.transcription?.wordChunks?.length) {
+        try {
+          const wordIds = await wordIdsFromSubtitles(content.transcription.wordChunks);
+          if (wordIds.length) {
+          const response = await exercisesApi.getExercises(userId, {
+            wordIds,
+            exerciseLimit: 40,
+            videoId: Number(content.id) || undefined,
+          });
+          content.exercises = adaptExercisesToUi(
+            response.exercises,
+            content.transcription?.wordChunks
+          );
+        }
+      } catch {
+        // Ignore exercise loading errors
+        }
+      }
+      return content;
     }
 
     // Otherwise, use nextContentId from state or fall back to first feed item
@@ -283,7 +305,26 @@ export const loadVideoContent = createAsyncThunk<VideoContent, string | undefine
     if (!id) {
       throw new Error('Контент отсутствует');
     }
-    return videoLearningApi.getContent(userId, id, userRole);
+    const content = await videoLearningApi.getContent(userId, id, userRole);
+    if (content?.transcription?.wordChunks?.length) {
+      try {
+        const wordIds = await wordIdsFromSubtitles(content.transcription.wordChunks);
+        if (wordIds.length) {
+          const response = await exercisesApi.getExercises(userId, {
+            wordIds,
+            exerciseLimit: 40,
+            videoId: Number(content.id) || undefined,
+          });
+          content.exercises = adaptExercisesToUi(
+            response.exercises,
+            content.transcription?.wordChunks
+          );
+        }
+      } catch {
+        // Ignore exercise loading errors
+      }
+    }
+    return content;
   },
   {
     condition: (contentId, { getState }) => {
@@ -316,14 +357,39 @@ export const submitVideoProgress = createAsyncThunk<
   { contentId: string; answers: SubmitAnswerPayload[] },
   { state: RootState }
 >('videoLearning/submitProgress', async ({ contentId, answers }, { getState }) => {
-  const userId = requireUserId(getState());
-  const response = await videoLearningApi.submitProgress(userId, contentId, answers);
+  const state = getState();
+  const userId = requireUserId(state);
+
+  const content = state.videoLearning.loadedContents[contentId] ?? state.videoLearning.content;
+  const exerciseMap = new Map(
+    (content?.exercises ?? []).map((ex) => [ex.id, ex as typeof ex & { wordId?: number }]),
+  );
+
+  let correct = 0;
+  await Promise.all(
+    answers.map(async ({ exerciseId, selectedOption }) => {
+      const ex = exerciseMap.get(exerciseId);
+      if (!ex) return;
+      const isCorrect = selectedOption === ex.correctAnswer;
+      if (isCorrect) correct += 1;
+      if (ex.wordId) {
+        try {
+          await exercisesApi.submitAnswer(userId, { wordId: ex.wordId, isCorrect });
+        } catch {
+          // ignore single-answer errors to avoid breaking flow
+        }
+      }
+    }),
+  );
+
+  const total = answers.length;
+  const completed = true;
   return {
     contentId,
-    total: response.result.total,
-    correct: response.result.correct,
-    completed: response.result.completed,
-    nextContentId: response.nextContentId,
+    total,
+    correct,
+    completed,
+    nextContentId: state.videoLearning.nextContentId,
   };
 });
 
@@ -485,6 +551,14 @@ const videoLearningSlice = createSlice({
         state.lastSubmission = undefined;
         // Cache the loaded content
         state.loadedContents[action.payload.id] = action.payload;
+        // Update feed item to include fresh exercises (so feed uses new data)
+        const feedIndex = state.feed.findIndex((item) => item.id === action.payload.id);
+        if (feedIndex >= 0) {
+          state.feed[feedIndex] = {
+            ...state.feed[feedIndex],
+            exercises: action.payload.exercises ?? state.feed[feedIndex].exercises,
+          };
+        }
         // Remove from loading
         delete state.loadingContents[action.payload.id];
       })

@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { memo, useEffect } from 'react';
 import { Animated, StyleSheet, TouchableOpacity, View } from 'react-native';
 import { useTheme } from 'styled-components/native';
 import { Ionicons } from '@expo/vector-icons';
@@ -9,7 +9,7 @@ interface FilterRelaxationBannerProps {
   onDismiss: () => void;
 }
 
-export const FilterRelaxationBanner = ({ message, onDismiss }: FilterRelaxationBannerProps) => {
+const FilterRelaxationBannerComponent = ({ message, onDismiss }: FilterRelaxationBannerProps) => {
   const theme = useTheme() as any;
   const opacity = new Animated.Value(0);
 
@@ -102,3 +102,5 @@ const styles = StyleSheet.create({
     padding: 4,
   },
 });
+
+export const FilterRelaxationBanner = memo(FilterRelaxationBannerComponent);
