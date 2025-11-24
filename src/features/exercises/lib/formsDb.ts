@@ -7,6 +7,7 @@ import {
 } from 'expo-sqlite';
 
 const DB_NAME = 'forms_index.db';
+const DB_VERSION = 2; // Increment this when forms_index.db changes
 const DB_ASSET = require('../../../../assets/forms_index.db');
 let dbInstance: SQLiteDatabase | null = null;
 let ensuringPromise: Promise<void> | null = null;
@@ -32,16 +33,38 @@ const ensureDatabase = async () => {
     const hasScheme = base.startsWith('file://');
     const baseDir = (hasScheme ? base : `file://${base}`).replace(/\/?$/, '/');
     const dest = `${baseDir}${DB_NAME}`;
+    const versionFile = `${baseDir}${DB_NAME}.version`;
+
     await FileSystem.makeDirectoryAsync(baseDir, { intermediates: true });
+
+    // Check if we need to update the database
+    let needsUpdate = false;
     const info = await FileSystem.getInfoAsync(dest);
     if (!info.exists) {
+      needsUpdate = true;
+    } else {
+      // Check version
+      const versionInfo = await FileSystem.getInfoAsync(versionFile);
+      if (!versionInfo.exists) {
+        needsUpdate = true;
+      } else {
+        const storedVersion = await FileSystem.readAsStringAsync(versionFile);
+        if (parseInt(storedVersion) !== DB_VERSION) {
+          needsUpdate = true;
+        }
+      }
+    }
+
+    if (needsUpdate) {
       const asset = Asset.fromModule(DB_ASSET);
       await asset.downloadAsync();
       if (!asset.localUri) {
         throw new Error('Failed to download forms_index.db asset');
       }
       await FileSystem.copyAsync({ from: asset.localUri, to: dest });
+      await FileSystem.writeAsStringAsync(versionFile, DB_VERSION.toString());
     }
+
     // directory expects a file path without scheme; strip file://
     const directoryPath = baseDir.replace(/^file:\/\//, '');
     dbInstance = openDatabaseSync(DB_NAME, undefined, directoryPath);

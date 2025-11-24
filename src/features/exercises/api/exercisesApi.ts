@@ -12,8 +12,8 @@ export type ExerciseProgress = {
 
 export type Exercise = {
   wordId: number;
-  lemma: string;
-  pos: string | null;
+  word: string;
+  partOfSpeech: string | null;
   direction: ExerciseDirection;
   prompt: string;
   correctAnswer: string;

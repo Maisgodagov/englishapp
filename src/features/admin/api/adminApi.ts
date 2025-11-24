@@ -1,62 +1,63 @@
-import { apiFetch } from '@shared/api/client';
+const API_URL = process.env.EXPO_PUBLIC_API_URL;
 
-import type { LessonSummary } from '@features/lessons/model/types';
+export type MuellerWord = {
+  id: number;
+  word: string;
+  part_of_speech: string | null;
+  translations: string;
+  moderated: number;
+};
 
-export interface AdminCourseModule {
-  id: string;
-  title: string;
-  description?: string;
-  order: number;
-  lessonCount: number;
-}
-
-export interface AdminCourse {
-  id: string;
-  title: string;
-  description?: string;
-  imageUrl?: string;
-  price: string;
-  difficultyLevels: string[];
-  isPublished: boolean;
-  modules: AdminCourseModule[];
-  updatedAt: string;
-}
-
-export interface AdminModuleCourseRef {
-  id: string;
-  title: string;
-  order: number;
-}
-
-export interface AdminModuleLesson {
-  id: string;
-  title: string;
-  order: number;
-  xpReward: number;
-}
-
-export interface AdminModule {
-  id: string;
-  title: string;
-  description?: string;
-  imageUrl?: string;
-  lessons: AdminModuleLesson[];
-  courses: AdminModuleCourseRef[];
-  updatedAt: string;
-}
-
-export interface AdminCatalogResponse {
-  courses: AdminCourse[];
-  modules: AdminModule[];
-  lessons: LessonSummary[];
-}
+export type WordsResponse = {
+  words: MuellerWord[];
+  total: number;
+  page: number;
+  totalPages: number;
+};
 
 export const adminApi = {
-  getCatalog(roleHeader: string) {
-    return apiFetch<AdminCatalogResponse>('admin/catalog', {
-      headers: {
-        'x-user-role': roleHeader,
-      },
+  async getWords(page: number, limit: number, moderated?: string): Promise<WordsResponse> {
+    const params = new URLSearchParams({
+      page: page.toString(),
+      limit: limit.toString(),
+      ...(moderated && { moderated }),
     });
+
+    const response = await fetch(`${API_URL}/admin/words?${params}`);
+    if (!response.ok) throw new Error('Failed to fetch words');
+    return response.json();
+  },
+
+  async updateWord(
+    id: number,
+    word: string,
+    partOfSpeech: string | null,
+    translations: string[],
+  ): Promise<void> {
+    const response = await fetch(`${API_URL}/admin/words/${id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ word, partOfSpeech, translations }),
+    });
+
+    if (!response.ok) throw new Error('Failed to update word');
+  },
+
+  async deleteWord(id: number): Promise<void> {
+    const response = await fetch(`${API_URL}/admin/words/${id}`, {
+      method: 'DELETE',
+    });
+
+    if (!response.ok) throw new Error('Failed to delete word');
+  },
+
+  async moderateWord(id: number, moderated: boolean): Promise<void> {
+    const response = await fetch(`${API_URL}/admin/words/${id}/moderate`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ moderated }),
+    });
+
+    if (!response.ok) throw new Error('Failed to moderate word');
   },
 };

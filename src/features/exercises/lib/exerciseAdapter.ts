@@ -9,9 +9,9 @@ export type UiExerciseWithMeta = UiExercise & {
 // Regex for removing punctuation - compiled once
 const PUNCTUATION_REGEX = /[.,!?;:'"]/g;
 
-const findWordTimestamp = (lemma: string, wordChunks: TranscriptWordChunk[]): Timestamp | undefined => {
-  // Handle multi-word lemmas (e.g., "one of a kind", "stop talking")
-  const words = lemma.toLowerCase().trim().split(' ');
+const findWordTimestamp = (word: string, wordChunks: TranscriptWordChunk[]): Timestamp | undefined => {
+  // Handle multi-word entries (e.g., "one of a kind", "stop talking")
+  const words = word.toLowerCase().trim().split(' ');
   const firstWord = words[0];
   const isSingleWord = words.length === 1;
 
@@ -45,7 +45,7 @@ export const adaptExercisesToUi = (
 
     // Find timestamp only for en-ru exercises (English word in prompt)
     const timestamp = item.direction === 'en-ru' && wordChunks
-      ? findWordTimestamp(item.lemma, wordChunks)
+      ? findWordTimestamp(item.word, wordChunks)
       : undefined;
 
     return {

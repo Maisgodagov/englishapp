@@ -23,40 +23,51 @@ const POPOVER_WIDTH = 240;
 const WORD_GAP = 16;
 
 async function fetchLookup(word: string): Promise<LookupData> {
-  const apiKey = process.env.EXPO_PUBLIC_YANDEX_DICT_KEY;
-  const hasCyrillic = /[\p{Script=Cyrillic}]/u.test(word);
-  const lang = hasCyrillic ? 'ru-en' : 'en-ru';
-  if (!apiKey) return { word, translation: word };
-
-  const params = new URLSearchParams({ key: apiKey, lang, text: word });
-  const url = `https://dictionary.yandex.net/api/v1/dicservice.json/lookup?${params.toString()}`;
-  const res = await fetch(url);
-  if (!res.ok) return { word, translation: word };
-
-  const data = (await res.json()) as { def?: Array<{ text?: string; ts?: string; tr?: Array<{ text?: string }> }> };
-  const defs = data.def ?? [];
-  const first = defs[0];
-  const allTranslations = (first?.tr ?? []).map((t) => t.text).filter((t): t is string => Boolean(t));
-  const trList = allTranslations.slice(0, 4);
-  const firstTr = trList[0] ?? word;
-  let audioUrl: string | undefined;
-  let transcription: string | undefined = first?.ts;
+  const apiUrl = process.env.EXPO_PUBLIC_API_URL;
+  if (!apiUrl) return { word, translation: word };
 
   try {
-    const english = (lang === 'en-ru' ? word : firstTr) || word;
-    if (/^[A-Za-z][A-Za-z\-']*$/.test(english)) {
-      const f = await fetch(`https://api.dictionaryapi.dev/api/v2/entries/en/${encodeURIComponent(english)}`);
-      if (f.ok) {
-        const j = (await f.json()) as Array<{ phonetics?: Array<{ audio?: string; text?: string }> }>;
-        const ph = j.flatMap((e) => e.phonetics || []);
-        const withAudio = ph.find((p) => p.audio) || ph[0];
-        audioUrl = withAudio?.audio;
-        transcription = transcription || withAudio?.text;
-      }
-    }
-  } catch {}
+    // Используем Mueller Dictionary API
+    const res = await fetch(`${apiUrl}/mueller/lookup?word=${encodeURIComponent(word)}`);
+    if (!res.ok) return { word, translation: word };
 
-  return { word, translation: firstTr, translations: trList, audioUrl, transcription };
+    const results = (await res.json()) as Array<{
+      id: number;
+      word: string;
+      partOfSpeech: string | null;
+      translations: string[];
+    }>;
+
+    if (!results || results.length === 0) {
+      return { word, translation: word };
+    }
+
+    const first = results[0];
+    const trList = first.translations.slice(0, 4);
+    const firstTr = trList[0] ?? word;
+    let audioUrl: string | undefined;
+    let transcription: string | undefined;
+
+    // Получаем аудио и транскрипцию из Free Dictionary API
+    try {
+      const english = first.word;
+      if (/^[A-Za-z][A-Za-z\-']*$/.test(english)) {
+        const f = await fetch(`https://api.dictionaryapi.dev/api/v2/entries/en/${encodeURIComponent(english)}`);
+        if (f.ok) {
+          const j = (await f.json()) as Array<{ phonetics?: Array<{ audio?: string; text?: string }> }>;
+          const ph = j.flatMap((e) => e.phonetics || []);
+          const withAudio = ph.find((p) => p.audio) || ph[0];
+          audioUrl = withAudio?.audio;
+          transcription = withAudio?.text;
+        }
+      }
+    } catch {}
+
+    return { word: first.word, translation: firstTr, translations: trList, audioUrl, transcription };
+  } catch (error) {
+    console.error('Mueller lookup error:', error);
+    return { word, translation: word };
+  }
 }
 
 export const WordLookupProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
