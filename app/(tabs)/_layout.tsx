@@ -1,5 +1,5 @@
 import { Tabs } from "expo-router";
-import { Book, Film, Home, ShieldCheck, User } from "lucide-react-native";
+import { Book, BookOpen, Film, Home, User } from "lucide-react-native";
 import { useTheme } from "styled-components/native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useAppSelector } from "@core/store/hooks";
@@ -54,12 +54,11 @@ export default function TabLayout() {
         }}
       />
       <Tabs.Screen
-        name="admin-dictionary"
+        name="lessons"
         options={{
-          title: "Admin",
-          href: isAdmin ? undefined : null,
+          title: "Lessons",
           tabBarIcon: ({ color }) => (
-            <ShieldCheck size={28} color={color} fill="none" />
+            <BookOpen size={28} color={color} fill="none" />
           ),
         }}
       />

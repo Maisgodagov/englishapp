@@ -1,20 +1,22 @@
+import React from "react";
 import {
-  View,
-  StyleSheet,
   ScrollView,
+  StyleSheet,
   Switch,
   TouchableOpacity,
+  View,
 } from "react-native";
-import { useAppSelector, useAppDispatch } from "@core/store/hooks";
-import { resetAuthState } from "@features/auth/model/authSlice";
-import { clearProfile } from "@entities/user/model/userSlice";
-import { useRouter } from "expo-router";
-import { Typography, PrimaryButton, SurfaceCard } from "@shared/ui";
-import { useThemeMode } from "@shared/theme/ThemeProvider";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { useRouter } from "expo-router";
 import { X } from "lucide-react-native";
 import { useTheme } from "styled-components/native";
+
+import { useAppDispatch, useAppSelector } from "@core/store/hooks";
+import { resetAuthState } from "@features/auth/model/authSlice";
+import { clearProfile } from "@entities/user/model/userSlice";
 import { roleDisplayName } from "@shared/constants/roles";
+import { useThemeMode } from "@shared/theme/ThemeProvider";
+import { PrimaryButton, SurfaceCard, Typography } from "@shared/ui";
 
 export default function SettingsScreen() {
   const profile = useAppSelector((s) => s.user.profile);
@@ -22,6 +24,7 @@ export default function SettingsScreen() {
   const router = useRouter();
   const { mode, toggle } = useThemeMode();
   const theme = useTheme();
+  const isAdmin = profile?.role === "admin";
 
   const handleLogout = () => {
     dispatch(resetAuthState());
@@ -103,6 +106,38 @@ export default function SettingsScreen() {
             </View>
           </SurfaceCard>
 
+          {isAdmin && (
+            <SurfaceCard style={styles.settingsCard}>
+              <Typography variant="subtitle" style={styles.subtitle}>
+                Административные инструменты
+              </Typography>
+              <TouchableOpacity
+                style={styles.linkButton}
+                onPress={() => router.push("/admin/dictionary")}
+              >
+                <Typography variant="body" style={styles.linkText}>
+                  Модерация словаря
+                </Typography>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.linkButton}
+                onPress={() => router.push("/admin/exercises")}
+              >
+                <Typography variant="body" style={styles.linkText}>
+                  Модерация упражнений
+                </Typography>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.linkButton}
+                onPress={() => router.push("/admin/lessons")}
+              >
+                <Typography variant="body" style={styles.linkText}>
+                  Уроки (админ)
+                </Typography>
+              </TouchableOpacity>
+            </SurfaceCard>
+          )}
+
           <PrimaryButton onPress={handleLogout} style={styles.logoutButton}>
             Выйти
           </PrimaryButton>
@@ -172,5 +207,17 @@ const getStyles = (theme: any) =>
     logoutButton: {
       backgroundColor: theme.colors.danger,
       marginTop: 20,
+    },
+    linkButton: {
+      paddingVertical: 10,
+      paddingHorizontal: 12,
+      borderRadius: 8,
+      backgroundColor: theme.colors.surface,
+      borderWidth: 1,
+      borderColor: theme.colors.border,
+    },
+    linkText: {
+      color: theme.colors.primary,
+      fontWeight: "600",
     },
   });

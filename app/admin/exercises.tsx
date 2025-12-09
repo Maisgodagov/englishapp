@@ -1,12 +1,12 @@
 import React from "react";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { StyleSheet, Text, View } from "react-native";
+import { StyleSheet, Text } from "react-native";
 
 import { useAppSelector } from "@core/store/hooks";
 import { selectIsAdmin } from "@entities/user/model/selectors";
-import AdminDictionaryScreen from "@features/admin/screens/AdminDictionaryScreen";
+import AdminExercisesScreen from "@features/admin/screens/AdminExercisesScreen";
 
-export default function AdminDictionaryRoute() {
+export default function AdminExercisesRoute() {
   const isAdmin = useAppSelector(selectIsAdmin);
 
   if (!isAdmin) {
@@ -17,11 +17,7 @@ export default function AdminDictionaryRoute() {
     );
   }
 
-  return (
-    <View style={{ flex: 1 }}>
-      <AdminDictionaryScreen />
-    </View>
-  );
+  return <AdminExercisesScreen />;
 }
 
 const styles = StyleSheet.create({

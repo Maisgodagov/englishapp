@@ -13,12 +13,21 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
-import { adminApi, MuellerWord } from "../api/adminApi";
+import { adminApi, PrecomputedExercise } from "../api/adminApi";
 
 const PAGE_SIZE = 50;
 
-export default function AdminDictionaryScreen() {
-  const [words, setWords] = useState<MuellerWord[]>([]);
+type EditableExercise = {
+  id: number;
+  prompt: string;
+  correctAnswer: string;
+  options: string[];
+  translations: string[];
+  partOfSpeech: string | null;
+};
+
+export default function AdminExercisesScreen() {
+  const [items, setItems] = useState<PrecomputedExercise[]>([]);
   const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
@@ -26,70 +35,92 @@ export default function AdminDictionaryScreen() {
   const [search, setSearch] = useState("");
 
   const [editModalVisible, setEditModalVisible] = useState(false);
-  const [editingWord, setEditingWord] = useState<MuellerWord | null>(null);
-  const [editWordText, setEditWordText] = useState("");
-  const [editPos, setEditPos] = useState("");
-  const [editTranslations, setEditTranslations] = useState("");
+  const [editing, setEditing] = useState<EditableExercise | null>(null);
 
-  const loadWords = async () => {
+  const loadItems = async () => {
     try {
       setLoading(true);
-      const response = await adminApi.getWords(page, PAGE_SIZE, filter || undefined, search || undefined);
-      setWords(response.words);
+      const response = await adminApi.getPrecomputed(
+        page,
+        PAGE_SIZE,
+        filter || undefined,
+        search || undefined,
+      );
+      setItems(response.items);
       setTotalPages(response.totalPages);
     } catch (error) {
-      Alert.alert("Ошибка", "Не удалось загрузить слова");
+      Alert.alert("Ошибка", "Не удалось загрузить упражнения");
     } finally {
       setLoading(false);
     }
   };
 
   useEffect(() => {
-    loadWords();
+    loadItems();
   }, [page, filter, search]);
 
-  const handleEdit = (word: MuellerWord) => {
-    setEditingWord(word);
-    setEditWordText(word.word);
-    setEditPos(word.part_of_speech ?? "");
-    setEditTranslations(word.translations.split("||").join("\n"));
+  const handleEdit = (item: PrecomputedExercise) => {
+    const optionsParsed = (() => {
+      try {
+        const arr = JSON.parse(item.options);
+        return Array.isArray(arr) ? arr : [];
+      } catch {
+        return [];
+      }
+    })();
+    setEditing({
+      id: item.id,
+      prompt: item.prompt,
+      correctAnswer: item.correct_answer,
+      options: optionsParsed,
+      translations: item.translations.split("||").filter(Boolean),
+      partOfSpeech: item.part_of_speech,
+    });
     setEditModalVisible(true);
   };
 
-  const handleSaveEdit = async () => {
-    if (!editingWord) return;
+  const handleSave = async () => {
+    if (!editing) return;
 
-    const translations = editTranslations
-      .split("\n")
-      .map((t) => t.trim())
-      .filter(Boolean);
+    const prompt = editing.prompt.trim();
+    const correctAnswer = editing.correctAnswer.trim();
+    const options = editing.options.map((o) => o.trim()).filter(Boolean);
+    const translations = editing.translations.map((t) => t.trim()).filter(Boolean);
+    const partOfSpeech = editing.partOfSpeech?.trim() || null;
+
+    if (!prompt || !correctAnswer || options.length < 1 || translations.length < 1) {
+      Alert.alert("Ошибка", "Заполните все поля");
+      return;
+    }
 
     try {
-      await adminApi.updateWord(
-        editingWord.id,
-        editWordText.trim(),
-        editPos.trim() || null,
-        translations
+      await adminApi.updatePrecomputed(
+        editing.id,
+        prompt,
+        correctAnswer,
+        options,
+        translations,
+        partOfSpeech,
       );
       setEditModalVisible(false);
-      loadWords();
+      loadItems();
     } catch (error) {
-      Alert.alert("Ошибка", "Не удалось сохранить изменения");
+      Alert.alert("Ошибка", "Не удалось сохранить");
     }
   };
 
   const handleDelete = (id: number) => {
-    Alert.alert("Удалить слово?", "Это действие нельзя отменить", [
+    Alert.alert("Удалить упражнение?", "Это действие нельзя отменить", [
       { text: "Отмена", style: "cancel" },
       {
         text: "Удалить",
         style: "destructive",
         onPress: async () => {
           try {
-            await adminApi.deleteWord(id);
-            loadWords();
+            await adminApi.deletePrecomputed(id);
+            loadItems();
           } catch (error) {
-            Alert.alert("Ошибка", "Не удалось удалить слово");
+            Alert.alert("Ошибка", "Не удалось удалить");
           }
         },
       },
@@ -98,15 +129,23 @@ export default function AdminDictionaryScreen() {
 
   const handleModerate = async (id: number, moderated: boolean) => {
     try {
-      await adminApi.moderateWord(id, moderated);
-      loadWords();
+      await adminApi.moderatePrecomputed(id, moderated);
+      loadItems();
     } catch (error) {
-      Alert.alert("Ошибка", "Не удалось подтвердить слово");
+      Alert.alert("Ошибка", "Не удалось подтвердить");
     }
   };
 
-  const renderItem = ({ item }: { item: MuellerWord }) => {
+  const renderItem = ({ item }: { item: PrecomputedExercise }) => {
     const translations = item.translations.split("||").slice(0, 3);
+    const optionsParsed = (() => {
+      try {
+        const arr = JSON.parse(item.options);
+        return Array.isArray(arr) ? arr : [];
+      } catch {
+        return [];
+      }
+    })();
 
     return (
       <View style={styles.card}>
@@ -120,15 +159,27 @@ export default function AdminDictionaryScreen() {
             ]}
           >
             <Text style={styles.badgeText}>
-              {item.moderated ? "✓ Подтвержден" : "✗ Не подтвержден"}
+              {item.moderated ? "✓ Подтверждено" : "✗ Не подтверждено"}
             </Text>
           </View>
         </View>
+
+        <Text style={styles.direction}>Направление: {item.direction}</Text>
+        <Text style={styles.prompt}>Вопрос: {item.prompt}</Text>
+        <Text style={styles.correct}>Ответ: {item.correct_answer}</Text>
 
         <View style={styles.translations}>
           {translations.map((t, idx) => (
             <Text key={idx} style={styles.translationItem}>
               {t}
+            </Text>
+          ))}
+        </View>
+
+        <View style={styles.optionsRow}>
+          {optionsParsed.map((opt, idx) => (
+            <Text key={idx} style={styles.option}>
+              {idx + 1}. {opt}
             </Text>
           ))}
         </View>
@@ -162,12 +213,12 @@ export default function AdminDictionaryScreen() {
   return (
     <SafeAreaView style={styles.container} edges={["top"]}>
       <View style={styles.header}>
-        <Text style={styles.title}>Словарь Мюллера</Text>
+        <Text style={styles.title}>Модерация упражнений</Text>
 
         <View style={styles.filters}>
           <TextInput
             style={styles.searchInput}
-            placeholder="Поиск по слову"
+            placeholder="Поиск по вопросу"
             value={search}
             onChangeText={(t) => {
               setSearch(t);
@@ -184,6 +235,7 @@ export default function AdminDictionaryScreen() {
           >
             <Text style={styles.filterButtonText}>Все</Text>
           </TouchableOpacity>
+
           <TouchableOpacity
             style={[styles.filterButton, filter === "true" && styles.filterButtonActive]}
             onPress={() => {
@@ -193,6 +245,7 @@ export default function AdminDictionaryScreen() {
           >
             <Text style={styles.filterButtonText}>Подтвержденные</Text>
           </TouchableOpacity>
+
           <TouchableOpacity
             style={[styles.filterButton, filter === "false" && styles.filterButtonActive]}
             onPress={() => {
@@ -212,9 +265,11 @@ export default function AdminDictionaryScreen() {
           >
             <Text style={styles.pageButtonText}>← Назад</Text>
           </TouchableOpacity>
+
           <Text style={styles.pageInfo}>
             Страница {page} из {totalPages}
           </Text>
+
           <TouchableOpacity
             style={[styles.pageButton, page >= totalPages && styles.pageButtonDisabled]}
             onPress={() => setPage((p) => Math.min(totalPages, p + 1))}
@@ -229,7 +284,7 @@ export default function AdminDictionaryScreen() {
         <ActivityIndicator size="large" color="#007bff" style={styles.loader} />
       ) : (
         <FlatList
-          data={words}
+          data={items}
           renderItem={renderItem}
           keyExtractor={(item) => item.id.toString()}
           contentContainerStyle={styles.list}
@@ -240,32 +295,60 @@ export default function AdminDictionaryScreen() {
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
             <ScrollView>
-              <Text style={styles.modalTitle}>Редактировать слово</Text>
+              <Text style={styles.modalTitle}>Редактировать упражнение</Text>
 
-              <Text style={styles.label}>Английское слово</Text>
+              <Text style={styles.label}>Вопрос (prompt)</Text>
               <TextInput
                 style={styles.input}
-                value={editWordText}
-                onChangeText={setEditWordText}
-                placeholder="Слово"
+                value={editing?.prompt ?? ""}
+                onChangeText={(t) => setEditing((prev) => (prev ? { ...prev, prompt: t } : prev))}
+                placeholder="Вопрос"
               />
 
-              <Text style={styles.label}>Часть речи (при необходимости)</Text>
+              <Text style={styles.label}>Правильный ответ</Text>
               <TextInput
                 style={styles.input}
-                value={editPos}
-                onChangeText={setEditPos}
-                placeholder="noun, verb..."
+                value={editing?.correctAnswer ?? ""}
+                onChangeText={(t) => setEditing((prev) => (prev ? { ...prev, correctAnswer: t } : prev))}
+                placeholder="Ответ"
+              />
+
+              <Text style={styles.label}>Опции (по одной в строке)</Text>
+              <TextInput
+                style={[styles.input, styles.textArea]}
+                value={editing?.options.join("\n") ?? ""}
+                onChangeText={(t) =>
+                  setEditing((prev) =>
+                    prev ? { ...prev, options: t.split("\n").map((x) => x.trim()) } : prev,
+                  )
+                }
+                placeholder="вариант 1"
+                multiline
+                numberOfLines={4}
               />
 
               <Text style={styles.label}>Переводы (по одному в строке)</Text>
               <TextInput
                 style={[styles.input, styles.textArea]}
-                value={editTranslations}
-                onChangeText={setEditTranslations}
+                value={editing?.translations.join("\n") ?? ""}
+                onChangeText={(t) =>
+                  setEditing((prev) =>
+                    prev ? { ...prev, translations: t.split("\n").map((x) => x.trim()) } : prev,
+                  )
+                }
                 placeholder="перевод 1"
                 multiline
-                numberOfLines={8}
+                numberOfLines={4}
+              />
+
+              <Text style={styles.label}>Часть речи (optional)</Text>
+              <TextInput
+                style={styles.input}
+                value={editing?.partOfSpeech ?? ""}
+                onChangeText={(t) =>
+                  setEditing((prev) => (prev ? { ...prev, partOfSpeech: t } : prev))
+                }
+                placeholder="noun, verb..."
               />
 
               <View style={styles.modalActions}>
@@ -275,9 +358,10 @@ export default function AdminDictionaryScreen() {
                 >
                   <Text style={styles.buttonText}>Отмена</Text>
                 </TouchableOpacity>
+
                 <TouchableOpacity
                   style={[styles.modalButton, styles.modalButtonSave]}
-                  onPress={handleSaveEdit}
+                  onPress={handleSave}
                 >
                   <Text style={styles.buttonText}>Сохранить</Text>
                 </TouchableOpacity>
@@ -299,9 +383,10 @@ const styles = StyleSheet.create({
     borderBottomColor: "#ddd",
   },
   title: { fontSize: 24, fontWeight: "bold", marginBottom: 16 },
-  filters: { flexDirection: "row", gap: 8, marginBottom: 16 },
+  filters: { flexDirection: "row", gap: 8, marginBottom: 16, flexWrap: "wrap" },
   searchInput: {
     flex: 1,
+    minWidth: 200,
     borderWidth: 1,
     borderColor: "#ddd",
     borderRadius: 8,
@@ -334,20 +419,20 @@ const styles = StyleSheet.create({
   loader: { marginTop: 32 },
   list: { padding: 16 },
   card: { backgroundColor: "#fff", padding: 16, borderRadius: 12, marginBottom: 12 },
-  cardHeader: {
-    flexDirection: "row",
-    alignItems: "center",
-    marginBottom: 12,
-    gap: 8,
-  },
+  cardHeader: { flexDirection: "row", alignItems: "center", marginBottom: 8, gap: 8 },
   wordId: { fontSize: 12, color: "#999" },
   wordText: { fontSize: 18, fontWeight: "bold", flex: 1 },
   badge: { paddingHorizontal: 8, paddingVertical: 4, borderRadius: 4 },
   badgeModerated: { backgroundColor: "#d4edda" },
   badgePending: { backgroundColor: "#fff3cd" },
   badgeText: { fontSize: 12, fontWeight: "500" },
-  translations: { marginBottom: 12, gap: 4 },
-  translationItem: { fontSize: 14, color: "#555" },
+  direction: { fontSize: 14, color: "#555", marginBottom: 4 },
+  prompt: { fontSize: 14, color: "#333", marginBottom: 4 },
+  correct: { fontSize: 14, color: "#111", fontWeight: "600", marginBottom: 4 },
+  translations: { marginBottom: 6, gap: 4 },
+  translationItem: { fontSize: 13, color: "#555" },
+  optionsRow: { marginBottom: 8, gap: 4 },
+  option: { fontSize: 13, color: "#444" },
   actions: { flexDirection: "row", gap: 8, flexWrap: "wrap" },
   button: { paddingHorizontal: 12, paddingVertical: 8, borderRadius: 6 },
   buttonEdit: { backgroundColor: "#ffc107" },
@@ -374,10 +459,10 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     padding: 12,
     fontSize: 14,
-    marginBottom: 16,
+    marginBottom: 12,
   },
-  textArea: { minHeight: 120, textAlignVertical: "top" },
-  modalActions: { flexDirection: "row", gap: 12, marginTop: 16 },
+  textArea: { minHeight: 100, textAlignVertical: "top" },
+  modalActions: { flexDirection: "row", gap: 12, marginTop: 12 },
   modalButton: { flex: 1, paddingVertical: 12, borderRadius: 8, alignItems: "center" },
   modalButtonCancel: { backgroundColor: "#6c757d" },
   modalButtonSave: { backgroundColor: "#28a745" },
